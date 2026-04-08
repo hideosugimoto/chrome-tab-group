@@ -3,10 +3,24 @@
  * direct chrome.* calls so that domain logic stays testable / mockable.
  */
 
-export async function getCurrentWindowId(): Promise<number> {
-  const win = await chrome.windows.getCurrent({ populate: false });
+/**
+ * Best-effort window resolver for callers without an explicit windowId
+ * (e.g. keyboard shortcut handlers). Prefers the *last focused normal*
+ * window — `chrome.windows.getCurrent()` from a service worker is
+ * unreliable and often returns the wrong window when popups / multiple
+ * windows are involved.
+ *
+ * UI callers (popup) should always pass the windowId explicitly
+ * because the popup is the only context that *knows* which window the
+ * user just clicked the action button in.
+ */
+export async function getFallbackWindowId(): Promise<number> {
+  const win = await chrome.windows.getLastFocused({
+    populate: false,
+    windowTypes: ['normal']
+  });
   if (typeof win.id !== 'number') {
-    throw new Error('No current window id available.');
+    throw new Error('No focused window available.');
   }
   return win.id;
 }

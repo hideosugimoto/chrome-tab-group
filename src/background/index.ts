@@ -26,7 +26,7 @@ import { CATEGORY_COLOR } from '../constants/colors';
 import { CATEGORY_ORDER } from '../constants/categories';
 import { getSettings, getUndoSnapshot, setSettings, setUndoSnapshot } from '../storage/store';
 import {
-  getCurrentWindowId,
+  getFallbackWindowId,
   getTabsInWindow,
   moveSingleTab,
   ungroupTabs
@@ -42,10 +42,10 @@ import { suggestSplitPairs } from '../scoring/splitPair';
 // ─── Message protocol ────────────────────────────────────────────────
 
 export type RequestMessage =
-  | { kind: 'preview' }
-  | { kind: 'organize' }
+  | { kind: 'preview'; windowId: number }
+  | { kind: 'organize'; windowId: number }
   | { kind: 'undo' }
-  | { kind: 'suggestPairs' }
+  | { kind: 'suggestPairs'; windowId: number }
   | { kind: 'getSettings' }
   | { kind: 'setSettings'; patch: Partial<Settings> };
 
@@ -120,9 +120,8 @@ async function buildSnapshot(windowId: number): Promise<UndoSnapshot> {
 
 // ─── Preview ────────────────────────────────────────────────────────
 
-async function handlePreview(): Promise<ResponseMessage> {
+async function handlePreview(windowId: number): Promise<ResponseMessage> {
   const settings = await getSettings();
-  const windowId = await getCurrentWindowId();
   const tabs = await getTabsInWindow(windowId);
   const classified = selectAndClassify(tabs, settings);
 
@@ -221,9 +220,8 @@ async function restoreActiveTabPosition(
   }
 }
 
-async function handleOrganize(): Promise<ResponseMessage> {
+async function handleOrganize(windowId: number): Promise<ResponseMessage> {
   const settings = await getSettings();
-  const windowId = await getCurrentWindowId();
 
   // Snapshot current state for Undo BEFORE we touch anything.
   await setUndoSnapshot(await buildSnapshot(windowId));
@@ -318,9 +316,8 @@ async function handleUndo(): Promise<ResponseMessage> {
 
 // ─── Suggest pairs ──────────────────────────────────────────────────
 
-async function handleSuggestPairs(): Promise<ResponseMessage> {
+async function handleSuggestPairs(windowId: number): Promise<ResponseMessage> {
   const settings = await getSettings();
-  const windowId = await getCurrentWindowId();
   const tabs = await getTabsInWindow(windowId);
   const eligible = tabs.filter((t) => {
     if (settings.ignorePinnedTabs && t.pinned) return false;
@@ -360,16 +357,16 @@ chrome.runtime.onMessage.addListener(
       try {
         switch (msg.kind) {
           case 'preview':
-            sendResponse(await handlePreview());
+            sendResponse(await handlePreview(msg.windowId));
             break;
           case 'organize':
-            sendResponse(await handleOrganize());
+            sendResponse(await handleOrganize(msg.windowId));
             break;
           case 'undo':
             sendResponse(await handleUndo());
             break;
           case 'suggestPairs':
-            sendResponse(await handleSuggestPairs());
+            sendResponse(await handleSuggestPairs(msg.windowId));
             break;
           case 'getSettings':
             sendResponse({ kind: 'settings', settings: await getSettings() });
@@ -397,8 +394,13 @@ chrome.runtime.onMessage.addListener(
 chrome.commands.onCommand.addListener((command) => {
   void (async () => {
     try {
-      if (command === 'organize-now') await handleOrganize();
-      if (command === 'undo-organize') await handleUndo();
+      if (command === 'organize-now') {
+        const windowId = await getFallbackWindowId();
+        await handleOrganize(windowId);
+      }
+      if (command === 'undo-organize') {
+        await handleUndo();
+      }
     } catch (e) {
       console.error('command handler error:', e);
     }

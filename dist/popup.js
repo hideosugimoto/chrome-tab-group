@@ -1,4 +1,19 @@
 // src/popup/popup.ts
+async function resolvePopupWindowId() {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (activeTab && typeof activeTab.windowId === "number") return activeTab.windowId;
+  const win = await chrome.windows.getCurrent({ populate: false });
+  if (typeof win.id !== "number") {
+    throw new Error("Could not resolve popup window id.");
+  }
+  return win.id;
+}
+var cachedWindowId = null;
+async function getWindowId() {
+  if (cachedWindowId !== null) return cachedWindowId;
+  cachedWindowId = await resolvePopupWindowId();
+  return cachedWindowId;
+}
 function send(req) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(req, (resp) => {
@@ -76,7 +91,8 @@ function renderPairs(pairs) {
   section.hidden = false;
 }
 async function refreshPreview() {
-  const resp = await send({ kind: "preview" });
+  const windowId = await getWindowId();
+  const resp = await send({ kind: "preview", windowId });
   if (resp.kind === "preview") {
     renderCounts(resp.totalTabs, resp.counts);
   } else if (resp.kind === "error") {
@@ -96,7 +112,8 @@ async function saveSettings(patch) {
 function wireEvents() {
   $("btn-organize").addEventListener("click", async () => {
     setStatus("Organizing\u2026");
-    const resp = await send({ kind: "organize" });
+    const windowId = await getWindowId();
+    const resp = await send({ kind: "organize", windowId });
     if (resp.kind === "organize") {
       setStatus(`Grouped ${resp.movedTabs} tabs into ${resp.createdGroups} groups.`);
       await refreshPreview();
@@ -106,7 +123,8 @@ function wireEvents() {
   });
   $("btn-suggest").addEventListener("click", async () => {
     setStatus("Scoring pairs\u2026");
-    const resp = await send({ kind: "suggestPairs" });
+    const windowId = await getWindowId();
+    const resp = await send({ kind: "suggestPairs", windowId });
     if (resp.kind === "suggestPairs") {
       renderPairs(resp.pairs);
       setStatus(`${resp.pairs.length} suggestion(s).`);

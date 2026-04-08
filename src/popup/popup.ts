@@ -5,6 +5,33 @@
 import type { RequestMessage, ResponseMessage, SerializedPair } from '../background/index';
 import type { CategoryCount, Settings } from '../types';
 
+/**
+ * Resolve the windowId of the window the popup is anchored to.
+ *
+ * The popup script runs inside the window the user clicked the action
+ * button in, so the active tab in that window tells us reliably which
+ * window to operate on. We avoid `chrome.windows.getCurrent()` from the
+ * background SW because that returns the *last focused* window which
+ * may not be the popup's parent.
+ */
+async function resolvePopupWindowId(): Promise<number> {
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (activeTab && typeof activeTab.windowId === 'number') return activeTab.windowId;
+  // Fallback: ask windows API directly from the popup context.
+  const win = await chrome.windows.getCurrent({ populate: false });
+  if (typeof win.id !== 'number') {
+    throw new Error('Could not resolve popup window id.');
+  }
+  return win.id;
+}
+
+let cachedWindowId: number | null = null;
+async function getWindowId(): Promise<number> {
+  if (cachedWindowId !== null) return cachedWindowId;
+  cachedWindowId = await resolvePopupWindowId();
+  return cachedWindowId;
+}
+
 function send(req: RequestMessage): Promise<ResponseMessage> {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(req, (resp: ResponseMessage | undefined) => {
@@ -89,7 +116,8 @@ function renderPairs(pairs: SerializedPair[]): void {
 }
 
 async function refreshPreview(): Promise<void> {
-  const resp = await send({ kind: 'preview' });
+  const windowId = await getWindowId();
+  const resp = await send({ kind: 'preview', windowId });
   if (resp.kind === 'preview') {
     renderCounts(resp.totalTabs, resp.counts);
   } else if (resp.kind === 'error') {
@@ -112,7 +140,8 @@ async function saveSettings(patch: Partial<Settings>): Promise<void> {
 function wireEvents(): void {
   $('btn-organize').addEventListener('click', async () => {
     setStatus('Organizing…');
-    const resp = await send({ kind: 'organize' });
+    const windowId = await getWindowId();
+    const resp = await send({ kind: 'organize', windowId });
     if (resp.kind === 'organize') {
       setStatus(`Grouped ${resp.movedTabs} tabs into ${resp.createdGroups} groups.`);
       await refreshPreview();
@@ -123,7 +152,8 @@ function wireEvents(): void {
 
   $('btn-suggest').addEventListener('click', async () => {
     setStatus('Scoring pairs…');
-    const resp = await send({ kind: 'suggestPairs' });
+    const windowId = await getWindowId();
+    const resp = await send({ kind: 'suggestPairs', windowId });
     if (resp.kind === 'suggestPairs') {
       renderPairs(resp.pairs);
       setStatus(`${resp.pairs.length} suggestion(s).`);

@@ -381,10 +381,13 @@ async function setUndoSnapshot(snap) {
 }
 
 // src/services/tabsService.ts
-async function getCurrentWindowId() {
-  const win = await chrome.windows.getCurrent({ populate: false });
+async function getFallbackWindowId() {
+  const win = await chrome.windows.getLastFocused({
+    populate: false,
+    windowTypes: ["normal"]
+  });
   if (typeof win.id !== "number") {
-    throw new Error("No current window id available.");
+    throw new Error("No focused window available.");
   }
   return win.id;
 }
@@ -561,9 +564,8 @@ async function buildSnapshot(windowId) {
     }))
   };
 }
-async function handlePreview() {
+async function handlePreview(windowId) {
   const settings = await getSettings();
-  const windowId = await getCurrentWindowId();
   const tabs = await getTabsInWindow(windowId);
   const classified = selectAndClassify(tabs, settings);
   const countsMap = /* @__PURE__ */ new Map();
@@ -620,9 +622,8 @@ async function restoreActiveTabPosition(activeTab, windowId) {
   } catch {
   }
 }
-async function handleOrganize() {
+async function handleOrganize(windowId) {
   const settings = await getSettings();
-  const windowId = await getCurrentWindowId();
   await setUndoSnapshot(await buildSnapshot(windowId));
   const tabs = await getTabsInWindow(windowId);
   const activeTab = tabs.find((t) => t.active);
@@ -685,9 +686,8 @@ async function handleUndo() {
   await setUndoSnapshot(null);
   return { kind: "undo", ok: true };
 }
-async function handleSuggestPairs() {
+async function handleSuggestPairs(windowId) {
   const settings = await getSettings();
-  const windowId = await getCurrentWindowId();
   const tabs = await getTabsInWindow(windowId);
   const eligible = tabs.filter((t) => {
     if (settings.ignorePinnedTabs && t.pinned) return false;
@@ -722,16 +722,16 @@ chrome.runtime.onMessage.addListener(
       try {
         switch (msg.kind) {
           case "preview":
-            sendResponse(await handlePreview());
+            sendResponse(await handlePreview(msg.windowId));
             break;
           case "organize":
-            sendResponse(await handleOrganize());
+            sendResponse(await handleOrganize(msg.windowId));
             break;
           case "undo":
             sendResponse(await handleUndo());
             break;
           case "suggestPairs":
-            sendResponse(await handleSuggestPairs());
+            sendResponse(await handleSuggestPairs(msg.windowId));
             break;
           case "getSettings":
             sendResponse({ kind: "settings", settings: await getSettings() });
@@ -756,8 +756,13 @@ chrome.runtime.onMessage.addListener(
 chrome.commands.onCommand.addListener((command) => {
   void (async () => {
     try {
-      if (command === "organize-now") await handleOrganize();
-      if (command === "undo-organize") await handleUndo();
+      if (command === "organize-now") {
+        const windowId = await getFallbackWindowId();
+        await handleOrganize(windowId);
+      }
+      if (command === "undo-organize") {
+        await handleUndo();
+      }
     } catch (e) {
       console.error("command handler error:", e);
     }
