@@ -1,0 +1,31 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+
+# misc
+.DS_Store
+*.pem
+
+# debug
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# env files (can opt-in for committing if needed)
+.env*
+!.env.example
+
+# typescript
+*.tsbuildinfo
+
+# Claude Code state
+.claude/
+
+# Editor / IDE
+.vscode/
+.idea/
+
+# NOTE: dist/ is intentionally NOT ignored.
+# It is the prebuilt Chrome extension that end users load directly.
+# Always run `npm run build` before committing changes under src/.

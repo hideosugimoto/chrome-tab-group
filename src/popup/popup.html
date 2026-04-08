@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Engineer Tab Organizer</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Engineer Tab Organizer</h1>
+        <p id="summary">Loading…</p>
+      </header>
+
+      <section id="counts" aria-label="Category preview"></section>
+
+      <section class="actions">
+        <button id="btn-organize" type="button">Organize now</button>
+        <button id="btn-suggest" type="button">Suggest split pairs</button>
+        <button id="btn-undo" type="button">Undo last organize</button>
+      </section>
+
+      <section id="pairs" hidden>
+        <h2>Suggested pairs</h2>
+        <ul id="pairs-list"></ul>
+      </section>
+
+      <section class="settings">
+        <h2>Settings</h2>
+        <label>
+          <input id="set-ignore-pinned" type="checkbox" />
+          Ignore pinned tabs
+        </label>
+        <label>
+          <input id="set-keep-active" type="checkbox" />
+          Keep active tab position
+        </label>
+      </section>
+
+      <p id="status" class="status"></p>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

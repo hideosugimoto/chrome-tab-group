@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Engineer Tab Organizer",
+  "version": "0.1.0",
+  "description": "Rule-based, AI-free tab organizer for engineers. Group tabs by work context.",
+  "permissions": ["tabs", "tabGroups", "storage"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Engineer Tab Organizer",
+    "default_popup": "popup.html"
+  },
+  "commands": {
+    "organize-now": {
+      "suggested_key": { "default": "Ctrl+Shift+O", "mac": "Command+Shift+O" },
+      "description": "Organize tabs now"
+    },
+    "undo-organize": {
+      "description": "Undo last organize"
+    }
+  }
+}

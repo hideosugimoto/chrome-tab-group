@@ -1,0 +1,95 @@
+/* Minimal, fast, readable. No animations. */
+:root {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #57606a;
+  --border: #d0d7de;
+  --accent: #0969da;
+  --btn-bg: #f6f8fa;
+  --btn-bg-hover: #eaeef2;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --border: #30363d;
+    --accent: #58a6ff;
+    --btn-bg: #161b22;
+    --btn-bg-hover: #21262d;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  width: 320px;
+}
+
+main { padding: 12px 14px; }
+
+h1 { font-size: 14px; margin: 0 0 4px; }
+h2 { font-size: 12px; margin: 12px 0 6px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+#summary { margin: 0 0 10px; color: var(--muted); font-size: 12px; }
+
+#counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  margin-bottom: 10px;
+  min-height: 18px;
+}
+.count-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 8px;
+  font-size: 11px;
+  background: var(--btn-bg);
+}
+.count-chip .num { color: var(--accent); font-weight: 600; }
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.actions button {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: var(--btn-bg);
+  color: var(--fg);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+.actions button:hover { background: var(--btn-bg-hover); }
+.actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+#btn-organize { font-weight: 600; }
+
+#pairs ul { list-style: none; padding: 0; margin: 0; }
+#pairs li {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+#pairs .reason { color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+#pairs .pair-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.settings { border-top: 1px solid var(--border); padding-top: 8px; }
+.settings label { display: flex; align-items: center; gap: 6px; font-size: 12px; margin: 4px 0; }
+
+.status { margin: 8px 0 0; min-height: 14px; font-size: 11px; color: var(--muted); }
