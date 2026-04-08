@@ -381,6 +381,13 @@ async function setUndoSnapshot(snap) {
 }
 
 // src/services/tabsService.ts
+async function getWindowOrdinal(windowId) {
+  const wins = await chrome.windows.getAll({ windowTypes: ["normal"] });
+  if (wins.length <= 1) return null;
+  const sorted = wins.filter((w) => typeof w.id === "number").sort((a, b) => a.id - b.id);
+  const idx = sorted.findIndex((w) => w.id === windowId);
+  return idx === -1 ? null : idx + 1;
+}
 async function getFallbackWindowId() {
   const win = await chrome.windows.getLastFocused({
     populate: false,
@@ -577,7 +584,10 @@ async function handlePreview(windowId) {
     counts: CATEGORY_ORDER.map((cat) => ({ category: cat, count: countsMap.get(cat) ?? 0 })).filter((x) => x.count > 0)
   };
 }
-async function applyGroupingPlan(buckets, targetTabIds, windowId) {
+function formatGroupTitle(category, windowOrdinal) {
+  return windowOrdinal === null ? category : `${category} ${windowOrdinal}`;
+}
+async function applyGroupingPlan(buckets, targetTabIds, windowId, windowOrdinal) {
   try {
     await ungroupTabs(targetTabIds);
   } catch (e) {
@@ -592,7 +602,7 @@ async function applyGroupingPlan(buckets, targetTabIds, windowId) {
     try {
       const groupId = await groupTabs(ids, windowId);
       await updateGroup(groupId, {
-        title: bucket.category,
+        title: formatGroupTitle(bucket.category, windowOrdinal),
         color: CATEGORY_COLOR[bucket.category]
       });
       createdGroupIds.push(groupId);
@@ -635,7 +645,13 @@ async function handleOrganize(windowId) {
     classified.map(({ tab, category }) => ({ tab, category }))
   );
   const targetIds = classified.map((c) => c.tab.id).filter((id) => typeof id === "number");
-  const { movedTabs, createdGroups } = await applyGroupingPlan(buckets, targetIds, windowId);
+  const windowOrdinal = await getWindowOrdinal(windowId);
+  const { movedTabs, createdGroups } = await applyGroupingPlan(
+    buckets,
+    targetIds,
+    windowId,
+    windowOrdinal
+  );
   if (settings.keepActiveTabPosition) {
     await restoreActiveTabPosition(activeTab, windowId);
   }

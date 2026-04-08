@@ -28,6 +28,7 @@ import { getSettings, getUndoSnapshot, setSettings, setUndoSnapshot } from '../s
 import {
   getFallbackWindowId,
   getTabsInWindow,
+  getWindowOrdinal,
   moveSingleTab,
   ungroupTabs
 } from '../services/tabsService';
@@ -150,10 +151,18 @@ interface GroupingResult {
  * the canonical title/color, then move them to the right end in
  * order so the final left-to-right sequence matches CATEGORY_ORDER.
  */
+/** Format a category as the visible group title, with optional
+ *  per-window suffix to avoid Chrome's saved-tab-group bar showing
+ *  indistinguishable duplicates across windows. */
+function formatGroupTitle(category: Category, windowOrdinal: number | null): string {
+  return windowOrdinal === null ? category : `${category} ${windowOrdinal}`;
+}
+
 async function applyGroupingPlan(
   buckets: { category: Category; tabs: chrome.tabs.Tab[] }[],
   targetTabIds: number[],
-  windowId: number
+  windowId: number,
+  windowOrdinal: number | null
 ): Promise<GroupingResult> {
   // Ungroup first so chrome.tabs.group creates fresh groups cleanly.
   // Failure here is benign (tabs may already be ungrouped).
@@ -175,7 +184,7 @@ async function applyGroupingPlan(
     try {
       const groupId = await groupTabs(ids, windowId);
       await updateGroup(groupId, {
-        title: bucket.category,
+        title: formatGroupTitle(bucket.category, windowOrdinal),
         color: CATEGORY_COLOR[bucket.category]
       });
       createdGroupIds.push(groupId);
@@ -241,7 +250,17 @@ async function handleOrganize(windowId: number): Promise<ResponseMessage> {
     .map((c) => c.tab.id)
     .filter((id): id is number => typeof id === 'number');
 
-  const { movedTabs, createdGroups } = await applyGroupingPlan(buckets, targetIds, windowId);
+  // Compute per-window ordinal once so concurrent windows get unique
+  // group titles ("Misc 1" vs "Misc 2") that Chrome's shared saved-
+  // tab-group bar can distinguish.
+  const windowOrdinal = await getWindowOrdinal(windowId);
+
+  const { movedTabs, createdGroups } = await applyGroupingPlan(
+    buckets,
+    targetIds,
+    windowId,
+    windowOrdinal
+  );
 
   if (settings.keepActiveTabPosition) {
     await restoreActiveTabPosition(activeTab, windowId);
