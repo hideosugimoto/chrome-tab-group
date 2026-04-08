@@ -1,0 +1,48 @@
+#!/usr/bin/env sh
+# Pre-commit hook for chrome-tab-group.
+#
+# Purpose: keep the prebuilt `dist/` folder in sync with `src/` so end
+# users who download the repo can load the extension without Node.js.
+#
+# Behavior: if any staged file lives under `src/`, run `npm run build`
+# and stage the resulting dist/ updates so they land in the same commit.
+#
+# Security notes:
+#   - Only invokes the local `npm run build` script (esbuild bundling).
+#   - Performs no network calls.
+#   - Reads no secrets.
+#   - Does NOT auto-bypass anything; it either succeeds or fails the
+#     commit so the developer (or AI agent) sees the failure.
+#
+# Do NOT use `git commit --no-verify` to skip this hook.
+
+set -eu
+
+# Resolve repo root so the hook works from any subdirectory.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# 1. No-op if no src/ files are staged.
+if ! git diff --cached --name-only --diff-filter=ACMR | grep -q '^src/'; then
+  exit 0
+fi
+
+# 2. Require node_modules to be present (don't auto-install — that would
+#    hide a real misconfiguration and slow commits down).
+if [ ! -d node_modules ]; then
+  echo "[pre-commit] node_modules/ is missing." >&2
+  echo "[pre-commit] Run \`npm install\` once, then retry the commit." >&2
+  exit 1
+fi
+
+# 3. Rebuild dist/ from src/.
+echo "[pre-commit] src/ changes detected — running \`npm run build\`..."
+if ! npm run --silent build; then
+  echo "[pre-commit] build failed — commit aborted." >&2
+  exit 1
+fi
+
+# 4. Stage any dist/ updates produced by the rebuild.
+git add dist
+
+exit 0

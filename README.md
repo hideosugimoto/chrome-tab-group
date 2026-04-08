@@ -65,6 +65,13 @@ You only need the prebuilt `dist/` folder. No `npm`, no build step.
 npm install
 ```
 
+This installs dev dependencies **and** wires up a pre-commit hook
+(`.githooks/pre-commit`) that automatically rebuilds `dist/` whenever
+you commit changes under `src/`. The hook only runs the local
+`npm run build` (esbuild bundling) — no network, no secrets, no
+auto-installs. Do not bypass it with `--no-verify`; if it fails, fix
+the underlying build error and recommit.
+
 #### Build
 ```bash
 npm run build       # one-shot build → dist/
