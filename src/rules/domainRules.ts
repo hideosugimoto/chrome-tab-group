@@ -15,7 +15,7 @@ import type { DomainRule } from '../types';
  */
 export const DOMAIN_RULES: readonly DomainRule[] = [
   // ─── Review (path-qualified GitHub/GitLab/Bitbucket) ──────────────
-  { name: 'github-pr', hostMatch: /(^|\.)github\.com$/, pathInclude: /\/pull\/?/, category: 'Review' },
+  { name: 'github-pr', hostMatch: /(^|\.)github\.com$/, pathInclude: /\/pulls?(\/|$)/, category: 'Review' },
   { name: 'github-issues', hostMatch: /(^|\.)github\.com$/, pathInclude: /\/issues(\/|$)/, category: 'Review' },
   { name: 'github-actions', hostMatch: /(^|\.)github\.com$/, pathInclude: /\/actions(\/|$)/, category: 'Cloud' },
   { name: 'github-projects', hostMatch: /(^|\.)github\.com$/, pathInclude: /\/projects(\/|$)/, category: 'Review' },

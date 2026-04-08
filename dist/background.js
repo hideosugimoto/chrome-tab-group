@@ -23,23 +23,25 @@ function rootDomain(hostname) {
 
 // src/rules/localPatterns.ts
 var LOCAL_HOSTS = /* @__PURE__ */ new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1"]);
-var ENV_KEYWORDS = [
+var HOST_ENV_KEYWORDS = [
   "localhost",
   "staging",
   "stage",
   "stg",
-  "dev",
-  "develop",
   "qa",
-  "test",
+  "uat",
   "preview",
   "sandbox",
   "preprod",
-  "pre-prod",
-  "uat"
+  "pre-prod"
 ];
-var ENV_LABEL_RE = new RegExp(
-  "(^|[.\\-/_])(" + ENV_KEYWORDS.join("|") + ")([.\\-/_]|$)",
+var PATH_ENV_KEYWORDS = [...HOST_ENV_KEYWORDS, "dev", "develop", "test"];
+var HOST_ENV_RE = new RegExp(
+  "(^|[.\\-/_])(" + HOST_ENV_KEYWORDS.join("|") + ")([.\\-/_]|$)",
+  "i"
+);
+var PATH_ENV_RE = new RegExp(
+  "(^|[.\\-/_])(" + PATH_ENV_KEYWORDS.join("|") + ")([.\\-/_]|$)",
   "i"
 );
 function isLocalUrl(rawUrl) {
@@ -51,15 +53,15 @@ function isLocalUrl(rawUrl) {
   if (/^10\./.test(p.hostname)) return true;
   if (/^192\.168\./.test(p.hostname)) return true;
   if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(p.hostname)) return true;
-  if (ENV_LABEL_RE.test(p.hostname)) return true;
-  if (ENV_LABEL_RE.test(p.pathname)) return true;
+  if (HOST_ENV_RE.test(p.hostname)) return true;
+  if (PATH_ENV_RE.test(p.pathname)) return true;
   return false;
 }
 
 // src/rules/domainRules.ts
 var DOMAIN_RULES = [
   // ─── Review (path-qualified GitHub/GitLab/Bitbucket) ──────────────
-  { name: "github-pr", hostMatch: /(^|\.)github\.com$/, pathInclude: /\/pull\/?/, category: "Review" },
+  { name: "github-pr", hostMatch: /(^|\.)github\.com$/, pathInclude: /\/pulls?(\/|$)/, category: "Review" },
   { name: "github-issues", hostMatch: /(^|\.)github\.com$/, pathInclude: /\/issues(\/|$)/, category: "Review" },
   { name: "github-actions", hostMatch: /(^|\.)github\.com$/, pathInclude: /\/actions(\/|$)/, category: "Cloud" },
   { name: "github-projects", hostMatch: /(^|\.)github\.com$/, pathInclude: /\/projects(\/|$)/, category: "Review" },
@@ -347,7 +349,18 @@ var DEFAULT_SETTINGS = {
 async function getSettings() {
   const obj = await chrome.storage.local.get(KEY_SETTINGS);
   const stored = obj[KEY_SETTINGS];
-  return { ...DEFAULT_SETTINGS, ...stored ?? {} };
+  return normalizeSettings(stored);
+}
+function normalizeSettings(stored) {
+  const s = stored ?? {};
+  return {
+    ignorePinnedTabs: typeof s.ignorePinnedTabs === "boolean" ? s.ignorePinnedTabs : DEFAULT_SETTINGS.ignorePinnedTabs,
+    keepActiveTabPosition: typeof s.keepActiveTabPosition === "boolean" ? s.keepActiveTabPosition : DEFAULT_SETTINGS.keepActiveTabPosition,
+    userExcludedDomains: Array.isArray(s.userExcludedDomains) ? s.userExcludedDomains.filter((d) => typeof d === "string") : DEFAULT_SETTINGS.userExcludedDomains,
+    customRules: Array.isArray(s.customRules) ? s.customRules : void 0,
+    categoryOverrides: s.categoryOverrides && typeof s.categoryOverrides === "object" ? s.categoryOverrides : void 0,
+    splitPairHistory: Array.isArray(s.splitPairHistory) ? s.splitPairHistory : void 0
+  };
 }
 async function setSettings(patch) {
   const current = await getSettings();
@@ -562,25 +575,9 @@ async function handlePreview() {
     counts: CATEGORY_ORDER.map((cat) => ({ category: cat, count: countsMap.get(cat) ?? 0 })).filter((x) => x.count > 0)
   };
 }
-async function handleOrganize() {
-  const settings = await getSettings();
-  const windowId = await getCurrentWindowId();
-  const snapshot = await buildSnapshot(windowId);
-  await setUndoSnapshot(snapshot);
-  const tabs = await getTabsInWindow(windowId);
-  const activeTab = tabs.find((t) => t.active);
-  const activeTabId = activeTab?.id;
-  const activeOriginalIndex = activeTab?.index;
-  const classified = selectAndClassify(tabs, settings);
-  if (classified.length === 0) {
-    return { kind: "organize", movedTabs: 0, createdGroups: 0 };
-  }
-  const buckets = groupByCategoryOrdered(
-    classified.map(({ tab, category }) => ({ tab, category }))
-  );
-  const allTargetTabIds = classified.map((c) => c.tab.id).filter((id) => typeof id === "number");
+async function applyGroupingPlan(buckets, targetTabIds, windowId) {
   try {
-    await ungroupTabs(allTargetTabIds);
+    await ungroupTabs(targetTabIds);
   } catch (e) {
     console.debug("ungroup partial failure:", e);
   }
@@ -610,13 +607,36 @@ async function handleOrganize() {
       console.warn("group move failed:", e);
     }
   }
-  if (settings.keepActiveTabPosition && typeof activeTabId === "number" && typeof activeOriginalIndex === "number") {
-    try {
-      const after = await getTabsInWindow(windowId);
-      const target = Math.max(0, Math.min(activeOriginalIndex, after.length - 1));
-      await moveSingleTab(activeTabId, target);
-    } catch {
-    }
+  return { movedTabs, createdGroups };
+}
+async function restoreActiveTabPosition(activeTab, windowId) {
+  if (!activeTab || typeof activeTab.id !== "number" || typeof activeTab.index !== "number") return;
+  if (activeTab.pinned) return;
+  if (isExcludedUrl(activeTab.url)) return;
+  try {
+    const after = await getTabsInWindow(windowId);
+    const target = Math.max(0, Math.min(activeTab.index, after.length - 1));
+    await moveSingleTab(activeTab.id, target);
+  } catch {
+  }
+}
+async function handleOrganize() {
+  const settings = await getSettings();
+  const windowId = await getCurrentWindowId();
+  await setUndoSnapshot(await buildSnapshot(windowId));
+  const tabs = await getTabsInWindow(windowId);
+  const activeTab = tabs.find((t) => t.active);
+  const classified = selectAndClassify(tabs, settings);
+  if (classified.length === 0) {
+    return { kind: "organize", movedTabs: 0, createdGroups: 0 };
+  }
+  const buckets = groupByCategoryOrdered(
+    classified.map(({ tab, category }) => ({ tab, category }))
+  );
+  const targetIds = classified.map((c) => c.tab.id).filter((id) => typeof id === "number");
+  const { movedTabs, createdGroups } = await applyGroupingPlan(buckets, targetIds, windowId);
+  if (settings.keepActiveTabPosition) {
+    await restoreActiveTabPosition(activeTab, windowId);
   }
   return { kind: "organize", movedTabs, createdGroups };
 }

@@ -7,7 +7,17 @@ import type { CategoryCount, Settings } from '../types';
 
 function send(req: RequestMessage): Promise<ResponseMessage> {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(req, (resp: ResponseMessage) => {
+    chrome.runtime.sendMessage(req, (resp: ResponseMessage | undefined) => {
+      // Surface SW unavailable / disconnected / invalid handler errors
+      // instead of silently swallowing them.
+      const lastErr = chrome.runtime.lastError;
+      if (lastErr || !resp) {
+        resolve({
+          kind: 'error',
+          message: lastErr?.message ?? 'No response from background service worker.'
+        });
+        return;
+      }
       resolve(resp);
     });
   });

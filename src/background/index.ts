@@ -141,45 +141,29 @@ async function handlePreview(): Promise<ResponseMessage> {
 
 // ─── Organize ───────────────────────────────────────────────────────
 
-async function handleOrganize(): Promise<ResponseMessage> {
-  const settings = await getSettings();
-  const windowId = await getCurrentWindowId();
+interface GroupingResult {
+  movedTabs: number;
+  createdGroups: number;
+}
 
-  // 1. Snapshot current state for Undo BEFORE we touch anything.
-  const snapshot = await buildSnapshot(windowId);
-  await setUndoSnapshot(snapshot);
-
-  // 2. Capture active tab info (for "keep active position").
-  const tabs = await getTabsInWindow(windowId);
-  const activeTab = tabs.find((t) => t.active);
-  const activeTabId = activeTab?.id;
-  const activeOriginalIndex = activeTab?.index;
-
-  const classified = selectAndClassify(tabs, settings);
-  if (classified.length === 0) {
-    return { kind: 'organize', movedTabs: 0, createdGroups: 0 };
-  }
-
-  // 3. Bucket and order by canonical category order.
-  const buckets = groupByCategoryOrdered(
-    classified.map(({ tab, category }) => ({ tab, category }))
-  );
-
-  // 4. Ungroup the *organizable* tabs first so chrome.tabs.group always
-  //    creates fresh groups in the correct order. We don't touch pinned/
-  //    excluded tabs.
-  const allTargetTabIds = classified
-    .map((c) => c.tab.id)
-    .filter((id): id is number => typeof id === 'number');
+/**
+ * Apply the bucketing plan: ungroup target tabs, recreate groups with
+ * the canonical title/color, then move them to the right end in
+ * order so the final left-to-right sequence matches CATEGORY_ORDER.
+ */
+async function applyGroupingPlan(
+  buckets: { category: Category; tabs: chrome.tabs.Tab[] }[],
+  targetTabIds: number[],
+  windowId: number
+): Promise<GroupingResult> {
+  // Ungroup first so chrome.tabs.group creates fresh groups cleanly.
+  // Failure here is benign (tabs may already be ungrouped).
   try {
-    await ungroupTabs(allTargetTabIds);
+    await ungroupTabs(targetTabIds);
   } catch (e) {
-    // ungroup may fail if some tabs aren't currently grouped — that's fine.
     console.debug('ungroup partial failure:', e);
   }
 
-  // 5. Create groups in order. We do NOT specify an index when creating;
-  //    we move the group right after creation. This avoids stale indexes.
   let createdGroups = 0;
   let movedTabs = 0;
   const createdGroupIds: number[] = [];
@@ -189,7 +173,6 @@ async function handleOrganize(): Promise<ResponseMessage> {
       .map((t) => t.id)
       .filter((id): id is number => typeof id === 'number');
     if (ids.length === 0) continue;
-
     try {
       const groupId = await groupTabs(ids, windowId);
       await updateGroup(groupId, {
@@ -204,8 +187,8 @@ async function handleOrganize(): Promise<ResponseMessage> {
     }
   }
 
-  // 6. Re-order groups left-to-right per CATEGORY_ORDER.
-  //    Move each group to the right end in turn — they end up in order.
+  // Move each created group to the right end in turn — the result is
+  // CATEGORY_ORDER from left to right.
   for (const groupId of createdGroupIds) {
     try {
       await moveGroup(groupId, -1);
@@ -214,17 +197,56 @@ async function handleOrganize(): Promise<ResponseMessage> {
     }
   }
 
-  // 7. "Keep active tab position": after grouping, attempt to nudge the
-  //    active tab toward its original index (best-effort, won't break
-  //    grouping). We clamp to the current tab count.
-  if (settings.keepActiveTabPosition && typeof activeTabId === 'number' && typeof activeOriginalIndex === 'number') {
-    try {
-      const after = await getTabsInWindow(windowId);
-      const target = Math.max(0, Math.min(activeOriginalIndex, after.length - 1));
-      await moveSingleTab(activeTabId, target);
-    } catch {
-      // best-effort only
-    }
+  return { movedTabs, createdGroups };
+}
+
+/**
+ * Best-effort: nudge the active tab back toward its pre-organize index.
+ * Skipped for pinned / excluded tabs (they should never be moved).
+ */
+async function restoreActiveTabPosition(
+  activeTab: chrome.tabs.Tab | undefined,
+  windowId: number
+): Promise<void> {
+  if (!activeTab || typeof activeTab.id !== 'number' || typeof activeTab.index !== 'number') return;
+  if (activeTab.pinned) return;
+  if (isExcludedUrl(activeTab.url)) return;
+
+  try {
+    const after = await getTabsInWindow(windowId);
+    const target = Math.max(0, Math.min(activeTab.index, after.length - 1));
+    await moveSingleTab(activeTab.id, target);
+  } catch {
+    // best-effort only
+  }
+}
+
+async function handleOrganize(): Promise<ResponseMessage> {
+  const settings = await getSettings();
+  const windowId = await getCurrentWindowId();
+
+  // Snapshot current state for Undo BEFORE we touch anything.
+  await setUndoSnapshot(await buildSnapshot(windowId));
+
+  const tabs = await getTabsInWindow(windowId);
+  const activeTab = tabs.find((t) => t.active);
+
+  const classified = selectAndClassify(tabs, settings);
+  if (classified.length === 0) {
+    return { kind: 'organize', movedTabs: 0, createdGroups: 0 };
+  }
+
+  const buckets = groupByCategoryOrdered(
+    classified.map(({ tab, category }) => ({ tab, category }))
+  );
+  const targetIds = classified
+    .map((c) => c.tab.id)
+    .filter((id): id is number => typeof id === 'number');
+
+  const { movedTabs, createdGroups } = await applyGroupingPlan(buckets, targetIds, windowId);
+
+  if (settings.keepActiveTabPosition) {
+    await restoreActiveTabPosition(activeTab, windowId);
   }
 
   return { kind: 'organize', movedTabs, createdGroups };

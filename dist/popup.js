@@ -2,6 +2,14 @@
 function send(req) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(req, (resp) => {
+      const lastErr = chrome.runtime.lastError;
+      if (lastErr || !resp) {
+        resolve({
+          kind: "error",
+          message: lastErr?.message ?? "No response from background service worker."
+        });
+        return;
+      }
       resolve(resp);
     });
   });
