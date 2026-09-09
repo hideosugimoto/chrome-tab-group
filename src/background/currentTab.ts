@@ -136,7 +136,7 @@ export async function applyOverride(
   });
 
   const affected = await tabIdsMatchingKeys(windowId, [key]);
-  const result = await organizeWindow(windowId, affected);
+  const result = await organizeWindow(windowId, { restrictToTabIds: affected });
   return {
     key,
     affectedTabs: affected.size,
@@ -165,7 +165,7 @@ export async function clearOverridesForUrl(
     categoryOverrides: withoutOverrides(settings.categoryOverrides, keys)
   });
 
-  const result = await organizeWindow(windowId, affected);
+  const result = await organizeWindow(windowId, { restrictToTabIds: affected });
   return {
     key: keys.join(', '),
     affectedTabs: affected.size,

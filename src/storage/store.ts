@@ -9,7 +9,10 @@ export const DEFAULT_SETTINGS: Settings = {
   keepActiveTabPosition: true,
   userExcludedDomains: [],
   sortGroupsByCategory: true,
-  adoptMatchingGroups: true
+  adoptMatchingGroups: true,
+  // Off by default: moving the user's tabs without being asked is
+  // exactly the surprise this extension is built to avoid.
+  autoGroupEnabled: false
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -51,6 +54,7 @@ function normalizeSettings(stored: Partial<Settings> | undefined): Settings {
       : DEFAULT_SETTINGS.userExcludedDomains,
     sortGroupsByCategory: bool(s.sortGroupsByCategory, DEFAULT_SETTINGS.sortGroupsByCategory),
     adoptMatchingGroups: bool(s.adoptMatchingGroups, DEFAULT_SETTINGS.adoptMatchingGroups),
+    autoGroupEnabled: bool(s.autoGroupEnabled, DEFAULT_SETTINGS.autoGroupEnabled),
     categoryOverrides: normalizeOverrides(s.categoryOverrides),
     customRules: Array.isArray(s.customRules) ? s.customRules : undefined,
     splitPairHistory: Array.isArray(s.splitPairHistory) ? s.splitPairHistory : undefined

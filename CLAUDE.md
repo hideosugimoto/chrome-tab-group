@@ -89,6 +89,33 @@ Never reintroduce the old "ungroup everything, then rebuild" approach.
 Grouping is differential: `domain/groupPlan.ts` computes the minimum
 set of operations, and tabs already in the right place are not moved.
 
+## Automatic grouping stays quiet
+
+`background/autoGroup.ts` runs on tab events. It is off by default and
+must stay conservative — an organizer that moves tabs unexpectedly is
+worse than one you have to press.
+
+Its three invariants:
+
+- **Never creates a group.** It runs `organizeWindow` with
+  `assignOnly: true`; if the right group does not exist, the tab stays
+  where it is.
+- **Never moves the active tab.** Tabs that are focused at flush time
+  stay queued until `onActivated` releases them.
+- **Never writes the undo snapshot** (`skipSnapshot: true`), so "undo
+  the last organize" keeps pointing at the user's own last action.
+
+`domain/autoGroupTrigger.ts` decides what counts as a real change.
+A `groupId` change is deliberately NOT a trigger — that is what our
+own writes look like from the outside, and reacting to it would
+re-enter the grouping pass. Do not widen the trigger set without
+working through that loop.
+
+The pending queue lives in `chrome.storage.session`
+(`storage/pendingAutoGroup.ts`), not a module variable: the MV3
+service worker can be torn down between the tab event and the
+debounce firing.
+
 ## Overrides are the user's word
 
 `settings.categoryOverrides` (see `domain/overrides.ts`) records

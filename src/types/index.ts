@@ -76,10 +76,15 @@ export interface Settings {
   sortGroupsByCategory: boolean;
   /**
    * Re-adopt groups that carry our canonical title + color when the
-   * in-memory registry has been lost (service worker restart).
+   * registry has been lost (extension reload/update, browser restart).
    * Off = groups not in the registry are treated as the user's.
    */
   adoptMatchingGroups: boolean;
+  /**
+   * Absorb newly opened tabs into groups that already exist, without
+   * pressing anything. Never creates a group; see background/autoGroup.ts.
+   */
+  autoGroupEnabled: boolean;
   /** User corrections. Key -> category. See domain/overrides.ts. */
   categoryOverrides?: Record<string, Category>;
   /** Reserved for future custom rules editor. */

@@ -137,3 +137,4 @@ h2 { font-size: 12px; margin: 12px 0 6px; color: var(--muted); text-transform: u
 
 .note { margin: 0 0 8px; font-size: 11px; color: var(--muted); }
 .settings .note { margin: 6px 0 0; }
+.settings .sub-note { margin: 0 0 6px 20px; }

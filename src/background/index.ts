@@ -7,6 +7,7 @@
  *
  *   organize / undo / preview  -> background/organize.ts
  *   current tab + overrides    -> background/currentTab.ts
+ *   automatic grouping         -> background/autoGroup.ts
  *   split-pair suggestions     -> scoring/splitPair.ts
  */
 
@@ -23,6 +24,7 @@ import { getFallbackWindowId, getTabsInWindow } from '../services/tabsService';
 import { isExcludedUrl, isUserExcludedDomain } from '../domain/exclusion';
 import { suggestSplitPairs } from '../scoring/splitPair';
 import { organizeWindow, previewWindow, undoLast } from './organize';
+import { registerAutoGroupListeners } from './autoGroup';
 import { applyOverride, clearOverridesForUrl, describeActiveTab } from './currentTab';
 
 /** The active-tab payload crosses the message boundary unchanged. */
@@ -166,6 +168,10 @@ chrome.runtime.onMessage.addListener(
     return true; // keep the message channel open for async sendResponse
   }
 );
+
+// ─── Automatic grouping ─────────────────────────────────────────────
+
+registerAutoGroupListeners();
 
 // ─── Keyboard commands ──────────────────────────────────────────────
 

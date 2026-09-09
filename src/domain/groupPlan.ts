@@ -62,6 +62,10 @@ export interface GroupPlan {
  * @param skipCategories Categories that must never get a new group
  *   (e.g. 'Misc'). Tabs already in such a group are left where they
  *   are rather than being pulled out.
+ * @param allowNewGroups When false, tabs whose category has no group
+ *   yet are left exactly where they are. This is what makes automatic
+ *   grouping quiet: it can absorb a tab into an existing group, but
+ *   never invents one behind the user's back.
  */
 export function planGrouping(
   tabs: readonly PlanTab[],
@@ -69,10 +73,12 @@ export function planGrouping(
   options: {
     minTabsPerNewGroup?: number;
     skipCategories?: readonly Category[];
+    allowNewGroups?: boolean;
   } = {}
 ): GroupPlan {
   const minTabs = Math.max(1, options.minTabsPerNewGroup ?? 1);
   const skip = new Set<Category>(options.skipCategories ?? []);
+  const allowNewGroups = options.allowNewGroups ?? true;
 
   // First managed group per category wins; extras are ignored so we
   // never split a category across two groups in one window.
@@ -111,6 +117,7 @@ export function planGrouping(
       continue;
     }
 
+    if (!allowNewGroups) continue;
     if (skip.has(category)) continue;
     if (members.length < minTabs) continue;
 

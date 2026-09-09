@@ -22,7 +22,10 @@ var DEFAULT_SETTINGS = {
   keepActiveTabPosition: true,
   userExcludedDomains: [],
   sortGroupsByCategory: true,
-  adoptMatchingGroups: true
+  adoptMatchingGroups: true,
+  // Off by default: moving the user's tabs without being asked is
+  // exactly the surprise this extension is built to avoid.
+  autoGroupEnabled: false
 };
 async function getSettings() {
   const obj = await chrome.storage.local.get(KEY_SETTINGS);
@@ -51,6 +54,7 @@ function normalizeSettings(stored) {
     userExcludedDomains: Array.isArray(s.userExcludedDomains) ? s.userExcludedDomains.filter((d) => typeof d === "string") : DEFAULT_SETTINGS.userExcludedDomains,
     sortGroupsByCategory: bool(s.sortGroupsByCategory, DEFAULT_SETTINGS.sortGroupsByCategory),
     adoptMatchingGroups: bool(s.adoptMatchingGroups, DEFAULT_SETTINGS.adoptMatchingGroups),
+    autoGroupEnabled: bool(s.autoGroupEnabled, DEFAULT_SETTINGS.autoGroupEnabled),
     categoryOverrides: normalizeOverrides(s.categoryOverrides),
     customRules: Array.isArray(s.customRules) ? s.customRules : void 0,
     splitPairHistory: Array.isArray(s.splitPairHistory) ? s.splitPairHistory : void 0
@@ -582,6 +586,7 @@ function suggestSplitPairs(tabs, opts = {}) {
 function planGrouping(tabs, managedGroups, options = {}) {
   const minTabs = Math.max(1, options.minTabsPerNewGroup ?? 1);
   const skip = new Set(options.skipCategories ?? []);
+  const allowNewGroups = options.allowNewGroups ?? true;
   const groupForCategory = /* @__PURE__ */ new Map();
   for (const g of managedGroups) {
     if (!groupForCategory.has(g.category)) groupForCategory.set(g.category, g.groupId);
@@ -607,6 +612,7 @@ function planGrouping(tabs, managedGroups, options = {}) {
       }
       continue;
     }
+    if (!allowNewGroups) continue;
     if (skip.has(category)) continue;
     if (members.length < minTabs) continue;
     const tabIds = members.map((t) => t.tabId);
@@ -883,16 +889,17 @@ async function previewWindow(windowId) {
     skippedUserGroupTabs
   };
 }
-function buildPlan(touchable, managed, restrictToTabIds) {
-  const scoped = restrictToTabIds ? touchable.filter((c) => restrictToTabIds.has(c.tab.id)) : touchable;
+function buildPlan(touchable, managed, options) {
+  const restrict = options.restrictToTabIds;
+  const scoped = restrict ? touchable.filter((c) => restrict.has(c.tab.id)) : touchable;
   const planTabs = scoped.map((c) => ({
     tabId: c.tab.id,
     category: c.result.category,
     currentGroupId: c.tab.groupId ?? UNGROUPED2
   }));
-  return planGrouping(planTabs, managed);
+  return planGrouping(planTabs, managed, { allowNewGroups: !options.assignOnly });
 }
-async function organizeWindow(windowId, restrictToTabIds) {
+async function organizeWindow(windowId, options = {}) {
   const settings = await getSettings();
   const { managed, liveGroups } = await resolveManagedGroups(windowId, settings);
   await pruneManagedGroups(new Set((await getAllGroups()).map((g) => g.id)));
@@ -900,17 +907,20 @@ async function organizeWindow(windowId, restrictToTabIds) {
   const activeTab = await getActiveTabInWindow(windowId);
   const managedIds = new Set(managed.map((m) => m.groupId));
   const { touchable, skippedUserGroupTabs } = selectTouchableTabs(tabs, settings, managedIds);
-  const plan = buildPlan(touchable, managed, restrictToTabIds);
+  const plan = buildPlan(touchable, managed, options);
   if (plan.touchedTabIds.length === 0) {
     return { movedTabs: 0, createdGroups: 0, skippedUserGroupTabs };
   }
-  await setUndoSnapshot(buildSnapshot(windowId, plan.touchedTabIds, tabs, liveGroups));
+  if (!options.skipSnapshot) {
+    await setUndoSnapshot(buildSnapshot(windowId, plan.touchedTabIds, tabs, liveGroups));
+  }
   const windowOrdinal = await getWindowOrdinal(windowId);
   const { movedTabs, createdGroups } = await applyPlan(plan, windowId, windowOrdinal);
-  if (settings.sortGroupsByCategory && !restrictToTabIds) {
+  const surgical = options.restrictToTabIds !== void 0 || options.skipSort === true;
+  if (settings.sortGroupsByCategory && !surgical) {
     await sortManagedGroups(windowId);
   }
-  if (settings.keepActiveTabPosition) {
+  if (settings.keepActiveTabPosition && !surgical) {
     await restoreActiveTabPosition(activeTab, windowId);
   }
   return { movedTabs, createdGroups, skippedUserGroupTabs };
@@ -971,6 +981,125 @@ async function undoLast() {
   return { ok: true };
 }
 
+// src/domain/autoGroupTrigger.ts
+function isAutoGroupTrigger(changeInfo, tabUrl) {
+  if (!tabUrl) return false;
+  if (typeof changeInfo.url === "string") return true;
+  return changeInfo.status === "complete";
+}
+
+// src/storage/pendingAutoGroup.ts
+var KEY2 = "pendingAutoGroup.v1";
+async function getPendingTabIds() {
+  const obj = await chrome.storage.session.get(KEY2);
+  const raw = obj[KEY2];
+  return Array.isArray(raw) ? raw.filter((n) => Number.isInteger(n)) : [];
+}
+async function addPendingTabIds(tabIds) {
+  if (tabIds.length === 0) return;
+  const current = await getPendingTabIds();
+  const merged = [.../* @__PURE__ */ new Set([...current, ...tabIds])];
+  await chrome.storage.session.set({ [KEY2]: merged });
+}
+async function removePendingTabIds(tabIds) {
+  if (tabIds.length === 0) return;
+  const drop = new Set(tabIds);
+  const remaining = (await getPendingTabIds()).filter((id) => !drop.has(id));
+  if (remaining.length === 0) {
+    await chrome.storage.session.remove(KEY2);
+    return;
+  }
+  await chrome.storage.session.set({ [KEY2]: remaining });
+}
+
+// src/background/autoGroup.ts
+var DEBOUNCE_MS = 700;
+var flushTimer;
+function scheduleFlush() {
+  if (flushTimer !== void 0) clearTimeout(flushTimer);
+  flushTimer = setTimeout(() => {
+    flushTimer = void 0;
+    void flushPending();
+  }, DEBOUNCE_MS);
+}
+async function partitionPending(tabIds) {
+  const ready = [];
+  const gone = [];
+  for (const tabId of tabIds) {
+    let tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch {
+      gone.push(tabId);
+      continue;
+    }
+    if (tab.active) continue;
+    ready.push(tab);
+  }
+  return { ready, gone };
+}
+async function flushPending() {
+  const settings = await getSettings();
+  if (!settings.autoGroupEnabled) return;
+  const pending = await getPendingTabIds();
+  if (pending.length === 0) return;
+  const { ready, gone } = await partitionPending(pending);
+  await removePendingTabIds(gone);
+  if (ready.length === 0) return;
+  const byWindow = /* @__PURE__ */ new Map();
+  for (const tab of ready) {
+    if (typeof tab.id !== "number") continue;
+    const arr = byWindow.get(tab.windowId);
+    if (arr) arr.push(tab.id);
+    else byWindow.set(tab.windowId, [tab.id]);
+  }
+  for (const [windowId, tabIds] of byWindow) {
+    try {
+      await organizeWindow(windowId, {
+        restrictToTabIds: new Set(tabIds),
+        assignOnly: true,
+        skipSnapshot: true,
+        skipSort: true
+      });
+    } catch (e) {
+      console.warn("auto-group pass failed for window", windowId, e);
+    } finally {
+      await removePendingTabIds(tabIds);
+    }
+  }
+}
+function registerAutoGroupListeners() {
+  chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (!isAutoGroupTrigger(changeInfo, tab.url)) return;
+    void (async () => {
+      try {
+        const settings = await getSettings();
+        if (!settings.autoGroupEnabled) return;
+        await addPendingTabIds([tabId]);
+        scheduleFlush();
+      } catch (e) {
+        console.warn("auto-group queueing failed:", e);
+      }
+    })();
+  });
+  chrome.tabs.onActivated.addListener(() => {
+    void (async () => {
+      try {
+        const settings = await getSettings();
+        if (!settings.autoGroupEnabled) return;
+        if ((await getPendingTabIds()).length === 0) return;
+        scheduleFlush();
+      } catch (e) {
+        console.warn("auto-group activation check failed:", e);
+      }
+    })();
+  });
+  chrome.tabs.onRemoved.addListener((tabId) => {
+    void removePendingTabIds([tabId]).catch(() => {
+    });
+  });
+}
+
 // src/background/currentTab.ts
 async function describeActiveTab(windowId) {
   const tab = await getActiveTabInWindow(windowId);
@@ -1026,7 +1155,7 @@ async function applyOverride(windowId, url, scope, category) {
     categoryOverrides: withOverride(settings.categoryOverrides, key, category)
   });
   const affected = await tabIdsMatchingKeys(windowId, [key]);
-  const result = await organizeWindow(windowId, affected);
+  const result = await organizeWindow(windowId, { restrictToTabIds: affected });
   return {
     key,
     affectedTabs: affected.size,
@@ -1044,7 +1173,7 @@ async function clearOverridesForUrl(windowId, url) {
   await setSettings({
     categoryOverrides: withoutOverrides(settings.categoryOverrides, keys)
   });
-  const result = await organizeWindow(windowId, affected);
+  const result = await organizeWindow(windowId, { restrictToTabIds: affected });
   return {
     key: keys.join(", "),
     affectedTabs: affected.size,
@@ -1142,6 +1271,7 @@ chrome.runtime.onMessage.addListener(
     return true;
   }
 );
+registerAutoGroupListeners();
 chrome.commands.onCommand.addListener((command) => {
   void (async () => {
     try {

@@ -265,6 +265,7 @@ async function loadSettings() {
   const resp = await send({ kind: "getSettings" });
   if (resp.kind !== "settings") return;
   const s = resp.settings;
+  $checkbox("set-auto-group").checked = s.autoGroupEnabled;
   $checkbox("set-ignore-pinned").checked = s.ignorePinnedTabs;
   $checkbox("set-keep-active").checked = s.keepActiveTabPosition;
   $checkbox("set-sort-groups").checked = s.sortGroupsByCategory;
@@ -351,6 +352,7 @@ function wireSettings() {
       if (reload) await refreshPreview();
     });
   };
+  bind("set-auto-group", "autoGroupEnabled", false);
   bind("set-ignore-pinned", "ignorePinnedTabs", true);
   bind("set-keep-active", "keepActiveTabPosition", false);
   bind("set-sort-groups", "sortGroupsByCategory", false);

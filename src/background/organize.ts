@@ -304,28 +304,44 @@ export async function previewWindow(windowId: number): Promise<{
 function buildPlan(
   touchable: readonly ClassifiedTab[],
   managed: readonly ManagedGroup[],
-  restrictToTabIds: ReadonlySet<number> | undefined
+  options: OrganizeOptions
 ): ReturnType<typeof planGrouping> {
-  const scoped = restrictToTabIds
-    ? touchable.filter((c) => restrictToTabIds.has(c.tab.id))
-    : touchable;
+  const restrict = options.restrictToTabIds;
+  const scoped = restrict ? touchable.filter((c) => restrict.has(c.tab.id)) : touchable;
   const planTabs: PlanTab[] = scoped.map((c) => ({
     tabId: c.tab.id,
     category: c.result.category,
     currentGroupId: c.tab.groupId ?? UNGROUPED
   }));
-  return planGrouping(planTabs, managed);
+  return planGrouping(planTabs, managed, { allowNewGroups: !options.assignOnly });
 }
 
-/**
- * Organize the window.
- *
- * @param restrictToTabIds When given, only these tabs are considered.
- *   Used to apply a single override without reshuffling the window.
- */
+export interface OrganizeOptions {
+  /**
+   * Only these tabs are considered. Used to apply a single override,
+   * and by the automatic pass, without reshuffling the window.
+   */
+  restrictToTabIds?: ReadonlySet<number>;
+  /**
+   * Never create a group; only add to groups we already own. The
+   * automatic pass runs this way so it can absorb a stray tab without
+   * inventing groups the user did not ask for.
+   */
+  assignOnly?: boolean;
+  /**
+   * Skip the undo snapshot. Automatic runs set this so that "undo the
+   * last organize" keeps pointing at the user's own last action
+   * instead of some tab that opened in the background.
+   */
+  skipSnapshot?: boolean;
+  /** Skip the group reordering pass, which moves tabs. */
+  skipSort?: boolean;
+}
+
+/** Organize the window. */
 export async function organizeWindow(
   windowId: number,
-  restrictToTabIds?: ReadonlySet<number>
+  options: OrganizeOptions = {}
 ): Promise<OrganizeResult> {
   const settings = await getSettings();
   const { managed, liveGroups } = await resolveManagedGroups(windowId, settings);
@@ -339,23 +355,26 @@ export async function organizeWindow(
   const managedIds = new Set(managed.map((m) => m.groupId));
   const { touchable, skippedUserGroupTabs } = selectTouchableTabs(tabs, settings, managedIds);
 
-  const plan = buildPlan(touchable, managed, restrictToTabIds);
+  const plan = buildPlan(touchable, managed, options);
 
   if (plan.touchedTabIds.length === 0) {
     return { movedTabs: 0, createdGroups: 0, skippedUserGroupTabs };
   }
 
-  await setUndoSnapshot(buildSnapshot(windowId, plan.touchedTabIds, tabs, liveGroups));
+  if (!options.skipSnapshot) {
+    await setUndoSnapshot(buildSnapshot(windowId, plan.touchedTabIds, tabs, liveGroups));
+  }
 
   const windowOrdinal = await getWindowOrdinal(windowId);
   const { movedTabs, createdGroups } = await applyPlan(plan, windowId, windowOrdinal);
 
-  // Reordering moves tabs, so it is skipped for scoped (single
-  // override) runs — those must stay surgical.
-  if (settings.sortGroupsByCategory && !restrictToTabIds) {
+  // Reordering moves tabs, so it is skipped for scoped runs — a single
+  // override and the automatic pass must both stay surgical.
+  const surgical = options.restrictToTabIds !== undefined || options.skipSort === true;
+  if (settings.sortGroupsByCategory && !surgical) {
     await sortManagedGroups(windowId);
   }
-  if (settings.keepActiveTabPosition) {
+  if (settings.keepActiveTabPosition && !surgical) {
     await restoreActiveTabPosition(activeTab, windowId);
   }
 
