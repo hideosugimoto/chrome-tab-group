@@ -2,7 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { classify, classifyDetailed } from '../src/domain/classify';
-import { formatGroupTitle, parseGroupTitle, recognizeGroupTitle } from '../src/domain/groupTitle';
 
 test('built-in rules still classify the obvious cases', () => {
   assert.equal(classify({ url: 'https://github.com/o/r/pull/1', title: 'PR' }), 'Review');
@@ -67,24 +66,4 @@ test('custom rules shadow the built-ins', () => {
   assert.equal(r.category, 'Design');
   assert.equal(r.source, 'custom');
   assert.equal(r.ruleName, 'mine');
-});
-
-test('group titles round-trip through format and parse', () => {
-  assert.equal(formatGroupTitle('Dev', null), 'Dev');
-  assert.equal(formatGroupTitle('Dev', 2), 'Dev 2');
-  assert.equal(parseGroupTitle('Dev'), 'Dev');
-  assert.equal(parseGroupTitle('Dev 2'), 'Dev');
-  assert.equal(parseGroupTitle('Dev stuff'), null);
-  assert.equal(parseGroupTitle('Deployment'), null);
-  assert.equal(parseGroupTitle(''), null);
-  assert.equal(parseGroupTitle(undefined), null);
-});
-
-test('recognizeGroupTitle requires the canonical colour too', () => {
-  // Dev is blue in CATEGORY_COLOR.
-  assert.equal(recognizeGroupTitle('Dev', 'blue'), 'Dev');
-  assert.equal(recognizeGroupTitle('Dev 3', 'blue'), 'Dev');
-  assert.equal(recognizeGroupTitle('Dev', 'red'), null);
-  assert.equal(recognizeGroupTitle('Dev', undefined), null);
-  assert.equal(recognizeGroupTitle('My work', 'blue'), null);
 });

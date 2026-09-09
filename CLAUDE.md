@@ -89,6 +89,14 @@ SW. Everything the options page edits lives in `Settings`, so
 User-facing text belongs in one file per surface (`popup/text.ts`,
 `options/text.ts`). The background sends codes, never prose.
 
+Category display names live in `constants/categoryLabels.ts`. The
+`Category` type stays English — it is the code identifier and the
+override key format — but nothing user-facing shows it raw, including
+tab group titles. When you change a label, keep the old string in
+`titlesFor()`: `domain/groupTitle.ts` parses titles back to categories
+to recognize our own groups, and dropping a legacy string strands
+every group created before the change.
+
 ## Classification rules are data, not code
 
 When adding a new service to the classifier:

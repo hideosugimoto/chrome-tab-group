@@ -88,8 +88,9 @@ function buildCategorySelect(key: string, assigned: Category): HTMLSelectElement
   select.setAttribute('aria-label', `${key} のカテゴリ`);
   for (const category of ALL_CATEGORIES) {
     const opt = document.createElement('option');
+    // Value stays the Category identifier; only the label is localized.
     opt.value = category;
-    opt.textContent = category;
+    opt.textContent = UI.categoryLabel(category);
     select.appendChild(opt);
   }
   select.value = assigned;
@@ -100,7 +101,7 @@ function buildCategorySelect(key: string, assigned: Category): HTMLSelectElement
       if (!loaded) return;
       const merged = { ...(loaded.categoryOverrides ?? {}), [key]: next };
       if (await patchSettings({ categoryOverrides: merged })) {
-        setStatus(UI.overrideUpdated(key, next));
+        setStatus(UI.overrideUpdated(key, UI.categoryLabel(next)));
         renderOverrides();
       }
     })();

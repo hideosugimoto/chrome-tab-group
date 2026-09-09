@@ -44,8 +44,24 @@ function withoutDomain(existing, domain) {
   return existing.filter((d) => d !== domain);
 }
 
+// src/constants/categoryLabels.ts
+var CATEGORY_LABEL = {
+  Chat: "\u30C1\u30E3\u30C3\u30C8",
+  Review: "\u30EC\u30D3\u30E5\u30FC",
+  Dev: "\u958B\u767A",
+  Local: "\u30ED\u30FC\u30AB\u30EB",
+  Docs: "\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8",
+  Research: "\u8ABF\u67FB",
+  Cloud: "\u30AF\u30E9\u30A6\u30C9",
+  Data: "\u30C7\u30FC\u30BF",
+  Design: "\u30C7\u30B6\u30A4\u30F3",
+  AI: "AI",
+  Misc: "\u305D\u306E\u4ED6"
+};
+
 // src/options/text.ts
 var UI = {
+  categoryLabel: (category) => CATEGORY_LABEL[category],
   overrideCount: (n) => `\u4FEE\u6B63 ${n} \u4EF6\u3092\u4FDD\u5B58\u3057\u3066\u3044\u307E\u3059`,
   overrideFiltered: (shown, total) => `${total} \u4EF6\u4E2D ${shown} \u4EF6\u3092\u8868\u793A`,
   overrideUpdated: (key, category) => `${key} \u2192 ${category} \u306B\u5909\u66F4\u3057\u307E\u3057\u305F`,
@@ -127,7 +143,7 @@ function buildCategorySelect(key, assigned) {
   for (const category of ALL_CATEGORIES) {
     const opt = document.createElement("option");
     opt.value = category;
-    opt.textContent = category;
+    opt.textContent = UI.categoryLabel(category);
     select.appendChild(opt);
   }
   select.value = assigned;
@@ -138,7 +154,7 @@ function buildCategorySelect(key, assigned) {
       if (!loaded) return;
       const merged = { ...loaded.categoryOverrides ?? {}, [key]: next };
       if (await patchSettings({ categoryOverrides: merged })) {
-        setStatus(UI.overrideUpdated(key, next));
+        setStatus(UI.overrideUpdated(key, UI.categoryLabel(next)));
         renderOverrides();
       }
     })();

@@ -622,6 +622,25 @@ function planGrouping(tabs, managedGroups, options = {}) {
   return { assignments, creations, touchedTabIds };
 }
 
+// src/constants/categoryLabels.ts
+var CATEGORY_LABEL = {
+  Chat: "\u30C1\u30E3\u30C3\u30C8",
+  Review: "\u30EC\u30D3\u30E5\u30FC",
+  Dev: "\u958B\u767A",
+  Local: "\u30ED\u30FC\u30AB\u30EB",
+  Docs: "\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8",
+  Research: "\u8ABF\u67FB",
+  Cloud: "\u30AF\u30E9\u30A6\u30C9",
+  Data: "\u30C7\u30FC\u30BF",
+  Design: "\u30C7\u30B6\u30A4\u30F3",
+  AI: "AI",
+  Misc: "\u305D\u306E\u4ED6"
+};
+function titlesFor(category) {
+  const label = CATEGORY_LABEL[category];
+  return label === category ? [label] : [label, category];
+}
+
 // src/constants/colors.ts
 var CATEGORY_COLOR = {
   Chat: "green",
@@ -640,17 +659,19 @@ var CATEGORY_COLOR = {
 
 // src/domain/groupTitle.ts
 function formatGroupTitle(category, windowOrdinal) {
-  return windowOrdinal === null ? category : `${category} ${windowOrdinal}`;
+  const label = CATEGORY_LABEL[category];
+  return windowOrdinal === null ? label : `${label} ${windowOrdinal}`;
+}
+function matchesLabel(title, label) {
+  if (title === label) return true;
+  if (!title.startsWith(label + " ")) return false;
+  return /^[1-9][0-9]*$/.test(title.slice(label.length + 1));
 }
 function parseGroupTitle(title) {
   if (!title) return null;
   const trimmed = title.trim();
   for (const category of ALL_CATEGORIES) {
-    if (trimmed === category) return category;
-    if (trimmed.startsWith(category + " ")) {
-      const rest = trimmed.slice(category.length + 1);
-      if (/^[1-9][0-9]*$/.test(rest)) return category;
-    }
+    if (titlesFor(category).some((label) => matchesLabel(trimmed, label))) return category;
   }
   return null;
 }
@@ -659,6 +680,11 @@ function recognizeGroupTitle(title, color) {
   if (category === null) return null;
   if (color === void 0) return null;
   return CATEGORY_COLOR[category] === color ? category : null;
+}
+function needsTitleRefresh(currentTitle, category, windowOrdinal) {
+  const wanted = formatGroupTitle(category, windowOrdinal);
+  if (currentTitle === wanted) return false;
+  return parseGroupTitle(currentTitle) === category;
 }
 
 // src/domain/undoPlan.ts
@@ -860,6 +886,20 @@ async function applyPlan(plan, windowId, windowOrdinal) {
   if (newlyManaged.length > 0) await registerManagedGroups(newlyManaged);
   return { movedTabs, createdGroups };
 }
+async function refreshGroupTitles(managed, liveGroups, windowOrdinal) {
+  for (const entry of managed) {
+    const group = liveGroups.find((g) => g.id === entry.groupId);
+    if (!group) continue;
+    if (!needsTitleRefresh(group.title, entry.category, windowOrdinal)) continue;
+    try {
+      await updateGroup(entry.groupId, {
+        title: formatGroupTitle(entry.category, windowOrdinal)
+      });
+    } catch (e) {
+      console.warn("title refresh failed:", entry.category, e);
+    }
+  }
+}
 async function sortManagedGroups(windowId) {
   const registry = await getManagedGroups();
   const liveGroups = await getGroupsInWindow(windowId);
@@ -935,6 +975,7 @@ async function organizeWindow(windowId, options = {}) {
     await setUndoSnapshot(buildSnapshot(windowId, plan.touchedTabIds, tabs, liveGroups));
   }
   const windowOrdinal = await getWindowOrdinal(windowId);
+  await refreshGroupTitles(managed, liveGroups, windowOrdinal);
   const { movedTabs, createdGroups } = await applyPlan(plan, windowId, windowOrdinal);
   const surgical = options.restrictToTabIds !== void 0 || options.skipSort === true;
   if (settings.sortGroupsByCategory && !surgical) {
@@ -980,7 +1021,7 @@ async function restoreGroups(snap, alive) {
   }
   if (restored.length > 0) await registerManagedGroups(restored);
 }
-async function rebuildWindow(windowId) {
+async function dissolveOwnedGroups(windowId, snapshotStrays) {
   const settings = await getSettings();
   const liveGroups = await getGroupsInWindow(windowId);
   const registry = await getManagedGroups();
@@ -994,19 +1035,30 @@ async function rebuildWindow(windowId) {
     })),
     ownedIds
   );
-  if (touched.length > 0) {
-    await setUndoSnapshot(buildSnapshot(windowId, touched, tabs, liveGroups));
+  const snapshotSet = snapshotStrays ? touched : toUngroup;
+  if (snapshotSet.length > 0) {
+    await setUndoSnapshot(buildSnapshot(windowId, snapshotSet, tabs, liveGroups));
   }
   try {
     await ungroupTabs(toUngroup);
   } catch (e) {
-    console.warn("rebuild ungroup partial failure:", e);
+    console.warn("dissolve ungroup partial failure:", e);
   }
   const liveAfter = new Set((await getAllGroups()).map((g) => g.id));
   await pruneManagedGroups(liveAfter);
-  const dissolvedGroups = [...ownedIds].filter((id) => !liveAfter.has(id)).length;
+  return {
+    // Report what actually went away, not what we intended to remove.
+    dissolvedGroups: [...ownedIds].filter((id) => !liveAfter.has(id)).length,
+    releasedTabs: toUngroup.length
+  };
+}
+async function dissolveWindow(windowId) {
+  return dissolveOwnedGroups(windowId, false);
+}
+async function rebuildWindow(windowId) {
+  const dissolved = await dissolveOwnedGroups(windowId, true);
   const result = await organizeWindow(windowId, { skipSnapshot: true });
-  return { ...result, dissolvedGroups };
+  return { ...result, dissolvedGroups: dissolved.dissolvedGroups };
 }
 async function undoLast() {
   const snap = await getUndoSnapshot();
@@ -1281,52 +1333,46 @@ async function handleSuggestPairs(windowId) {
     }))
   };
 }
-async function route(msg) {
+async function routeWindowAction(msg) {
   switch (msg.kind) {
-    case "preview": {
-      const p = await previewWindow(msg.windowId);
-      return { kind: "preview", ...p };
-    }
-    case "organize": {
-      const r = await organizeWindow(msg.windowId);
-      return { kind: "organize", ...r };
-    }
-    case "rebuild": {
-      const r = await rebuildWindow(msg.windowId);
-      return { kind: "rebuild", ...r };
-    }
-    case "undo": {
-      const r = await undoLast();
-      return { kind: "undo", ...r };
-    }
+    case "preview":
+      return { kind: "preview", ...await previewWindow(msg.windowId) };
+    case "organize":
+      return { kind: "organize", ...await organizeWindow(msg.windowId) };
+    case "rebuild":
+      return { kind: "rebuild", ...await rebuildWindow(msg.windowId) };
+    case "dissolve":
+      return { kind: "dissolve", ...await dissolveWindow(msg.windowId) };
     case "suggestPairs":
       return handleSuggestPairs(msg.windowId);
+    case "activeTab":
+      return { kind: "activeTab", info: await describeActiveTab(msg.windowId) };
+    default:
+      return null;
+  }
+}
+async function routeOverrideAction(msg) {
+  const r = msg.kind === "setOverride" ? await applyOverride(msg.windowId, msg.url, msg.scope, msg.category) : await clearOverridesForUrl(msg.windowId, msg.url);
+  return {
+    kind: "overrideApplied",
+    key: r.key,
+    affectedTabs: r.affectedTabs,
+    movedTabs: r.movedTabs
+  };
+}
+async function route(msg) {
+  switch (msg.kind) {
+    case "undo":
+      return { kind: "undo", ...await undoLast() };
     case "getSettings":
       return { kind: "settings", settings: await getSettings() };
     case "setSettings":
       return { kind: "settings", settings: await setSettings(msg.patch) };
-    case "activeTab":
-      return { kind: "activeTab", info: await describeActiveTab(msg.windowId) };
-    case "setOverride": {
-      const r = await applyOverride(msg.windowId, msg.url, msg.scope, msg.category);
-      return {
-        kind: "overrideApplied",
-        key: r.key,
-        affectedTabs: r.affectedTabs,
-        movedTabs: r.movedTabs
-      };
-    }
-    case "clearOverride": {
-      const r = await clearOverridesForUrl(msg.windowId, msg.url);
-      return {
-        kind: "overrideApplied",
-        key: r.key,
-        affectedTabs: r.affectedTabs,
-        movedTabs: r.movedTabs
-      };
-    }
+    case "setOverride":
+    case "clearOverride":
+      return routeOverrideAction(msg);
     default:
-      return { kind: "error", message: "Unknown message." };
+      return await routeWindowAction(msg) ?? { kind: "error", message: "Unknown message." };
   }
 }
 chrome.runtime.onMessage.addListener(

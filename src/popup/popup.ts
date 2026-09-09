@@ -103,7 +103,7 @@ function renderCounts(total: number, counts: CategoryCount[], skipped: number): 
       const chip = document.createElement('span');
       chip.className = 'count-chip';
       const label = document.createElement('span');
-      label.textContent = c.category;
+      label.textContent = UI.categoryLabel(c.category);
       const num = document.createElement('span');
       num.className = 'num';
       num.textContent = String(c.count);
@@ -170,8 +170,9 @@ function populateCategorySelect(): void {
   select.replaceChildren();
   for (const category of ALL_CATEGORIES) {
     const opt = document.createElement('option');
+    // Value stays the Category identifier; only the label is localized.
     opt.value = category;
-    opt.textContent = category;
+    opt.textContent = UI.categoryLabel(category);
     select.appendChild(opt);
   }
 }
@@ -294,6 +295,24 @@ function wireRebuild(): void {
   });
 }
 
+function wireDissolve(): void {
+  $('btn-dissolve').addEventListener('click', async () => {
+    setStatus(UI.dissolving);
+    const windowId = await getWindowId();
+    const resp = await send({ kind: 'dissolve', windowId });
+    if (resp.kind === 'dissolve') {
+      setStatus(
+        resp.dissolvedGroups === 0
+          ? UI.dissolveNothing
+          : UI.dissolveDone(resp.dissolvedGroups, resp.releasedTabs)
+      );
+      await refreshAll();
+    } else if (resp.kind === 'error') {
+      setError(resp.message);
+    }
+  });
+}
+
 function wireSuggest(): void {
   $('btn-suggest').addEventListener('click', async () => {
     setStatus(UI.scoring);
@@ -336,7 +355,7 @@ function wireCurrentTab(): void {
       category
     });
     if (resp.kind === 'overrideApplied') {
-      setStatus(UI.overrideApplied(resp.key, category, resp.affectedTabs));
+      setStatus(UI.overrideApplied(resp.key, UI.categoryLabel(category), resp.affectedTabs));
       await refreshAll();
     } else if (resp.kind === 'error') {
       setError(resp.message);
@@ -377,6 +396,7 @@ function wireSettings(): void {
   populateCategorySelect();
   wireOrganize();
   wireRebuild();
+  wireDissolve();
   wireSuggest();
   wireUndo();
   wireCurrentTab();

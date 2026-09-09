@@ -23,7 +23,11 @@ import type {
 import { classifyDetailed } from '../domain/classify';
 import { isExcludedUrl, isUserExcludedDomain } from '../domain/exclusion';
 import { planGrouping, type ManagedGroup, type PlanTab } from '../domain/groupPlan';
-import { formatGroupTitle, recognizeGroupTitle } from '../domain/groupTitle';
+import {
+  formatGroupTitle,
+  needsTitleRefresh,
+  recognizeGroupTitle
+} from '../domain/groupTitle';
 import { planUndoRegroup } from '../domain/undoPlan';
 import { selectRebuildTabs } from '../domain/rebuildPlan';
 import { CATEGORY_COLOR } from '../constants/colors';
@@ -55,6 +59,11 @@ export interface OrganizeResult {
   movedTabs: number;
   createdGroups: number;
   skippedUserGroupTabs: number;
+}
+
+export interface DissolveResult {
+  dissolvedGroups: number;
+  releasedTabs: number;
 }
 
 export interface RebuildResult extends OrganizeResult {
@@ -241,6 +250,34 @@ async function applyPlan(
 }
 
 /**
+ * Bring the titles of groups we own up to the current canonical form.
+ *
+ * This is how existing groups migrate when the labels change — English
+ * titles from before the Japanese switch become Japanese on the next
+ * organize, with no action from the user. A group whose title we no
+ * longer recognize is left alone: that means the user renamed it, and
+ * renaming it back would be a fight they did not ask for.
+ */
+async function refreshGroupTitles(
+  managed: readonly ManagedGroup[],
+  liveGroups: readonly chrome.tabGroups.TabGroup[],
+  windowOrdinal: number | null
+): Promise<void> {
+  for (const entry of managed) {
+    const group = liveGroups.find((g) => g.id === entry.groupId);
+    if (!group) continue;
+    if (!needsTitleRefresh(group.title, entry.category, windowOrdinal)) continue;
+    try {
+      await updateGroup(entry.groupId, {
+        title: formatGroupTitle(entry.category, windowOrdinal)
+      });
+    } catch (e) {
+      console.warn('title refresh failed:', entry.category, e);
+    }
+  }
+}
+
+/**
  * Reorder the groups we own into CATEGORY_ORDER by moving each to the
  * right end in turn. Only our groups move; the user's groups keep
  * their positions relative to each other.
@@ -387,6 +424,7 @@ export async function organizeWindow(
   }
 
   const windowOrdinal = await getWindowOrdinal(windowId);
+  await refreshGroupTitles(managed, liveGroups, windowOrdinal);
   const { movedTabs, createdGroups } = await applyPlan(plan, windowId, windowOrdinal);
 
   // Reordering moves tabs, so it is skipped for scoped runs — a single
@@ -466,7 +504,17 @@ async function restoreGroups(
  * is destructive enough that a title-and-color guess is the wrong
  * basis for it. A group we never recorded stays the user's.
  */
-export async function rebuildWindow(windowId: number): Promise<RebuildResult> {
+/**
+ * Release every tab from the groups in the registry.
+ *
+ * @param snapshotStrays Also snapshot the ungrouped tabs that a
+ *   following organize pass would move, so one undo covers both halves
+ *   of a rebuild. Dissolve on its own does not need them.
+ */
+async function dissolveOwnedGroups(
+  windowId: number,
+  snapshotStrays: boolean
+): Promise<DissolveResult> {
   const settings = await getSettings();
   const liveGroups = await getGroupsInWindow(windowId);
   const registry = await getManagedGroups();
@@ -484,28 +532,45 @@ export async function rebuildWindow(windowId: number): Promise<RebuildResult> {
     ownedIds
   );
 
-  // One snapshot covering the whole operation, taken before anything
-  // moves, so a single undo restores the window as it was. Skipped
-  // when there is nothing to do — pressing rebuild on an already-tidy
-  // window must not throw away the undo of the user's last real action.
-  if (touched.length > 0) {
-    await setUndoSnapshot(buildSnapshot(windowId, touched, tabs, liveGroups));
+  // One snapshot, taken before anything moves, so a single undo
+  // restores the window. Skipped when there is nothing to do — pressing
+  // the button on an already-tidy window must not throw away the undo
+  // of the user's last real action.
+  const snapshotSet = snapshotStrays ? touched : toUngroup;
+  if (snapshotSet.length > 0) {
+    await setUndoSnapshot(buildSnapshot(windowId, snapshotSet, tabs, liveGroups));
   }
 
   try {
     await ungroupTabs(toUngroup);
   } catch (e) {
-    console.warn('rebuild ungroup partial failure:', e);
+    console.warn('dissolve ungroup partial failure:', e);
   }
 
   // Chrome removes a group once its last tab leaves; drop the dead IDs.
   const liveAfter = new Set((await getAllGroups()).map((g) => g.id));
   await pruneManagedGroups(liveAfter);
-  // Report what actually went away, not what we intended to remove.
-  const dissolvedGroups = [...ownedIds].filter((id) => !liveAfter.has(id)).length;
 
+  return {
+    // Report what actually went away, not what we intended to remove.
+    dissolvedGroups: [...ownedIds].filter((id) => !liveAfter.has(id)).length,
+    releasedTabs: toUngroup.length
+  };
+}
+
+/**
+ * Dissolve the groups we own and stop there, leaving the tabs
+ * ungrouped. The way to hand the window back untouched — or to start
+ * over by hand.
+ */
+export async function dissolveWindow(windowId: number): Promise<DissolveResult> {
+  return dissolveOwnedGroups(windowId, false);
+}
+
+export async function rebuildWindow(windowId: number): Promise<RebuildResult> {
+  const dissolved = await dissolveOwnedGroups(windowId, true);
   const result = await organizeWindow(windowId, { skipSnapshot: true });
-  return { ...result, dissolvedGroups };
+  return { ...result, dissolvedGroups: dissolved.dissolvedGroups };
 }
 
 /**

@@ -23,7 +23,13 @@ import { getSettings, setSettings } from '../storage/store';
 import { getFallbackWindowId, getTabsInWindow } from '../services/tabsService';
 import { isExcludedUrl, isUserExcludedDomain } from '../domain/exclusion';
 import { suggestSplitPairs } from '../scoring/splitPair';
-import { organizeWindow, previewWindow, rebuildWindow, undoLast } from './organize';
+import {
+  dissolveWindow,
+  organizeWindow,
+  previewWindow,
+  rebuildWindow,
+  undoLast
+} from './organize';
 import { registerAutoGroupListeners } from './autoGroup';
 import { applyOverride, clearOverridesForUrl, describeActiveTab } from './currentTab';
 
@@ -36,6 +42,7 @@ export type RequestMessage =
   | { kind: 'preview'; windowId: number }
   | { kind: 'organize'; windowId: number }
   | { kind: 'rebuild'; windowId: number }
+  | { kind: 'dissolve'; windowId: number }
   | { kind: 'undo' }
   | { kind: 'suggestPairs'; windowId: number }
   | { kind: 'getSettings' }
@@ -64,6 +71,7 @@ export type ResponseMessage =
       createdGroups: number;
       skippedUserGroupTabs: number;
     }
+  | { kind: 'dissolve'; dissolvedGroups: number; releasedTabs: number }
   | { kind: 'undo'; ok: boolean; reason?: UndoFailureReason }
   | { kind: 'suggestPairs'; pairs: SerializedPair[] }
   | { kind: 'settings'; settings: Settings }
@@ -115,52 +123,57 @@ async function handleSuggestPairs(windowId: number): Promise<ResponseMessage> {
   };
 }
 
-async function route(msg: RequestMessage): Promise<ResponseMessage> {
+/** Operations that act on one window. */
+async function routeWindowAction(
+  msg: Extract<RequestMessage, { windowId: number }>
+): Promise<ResponseMessage | null> {
   switch (msg.kind) {
-    case 'preview': {
-      const p = await previewWindow(msg.windowId);
-      return { kind: 'preview', ...p };
-    }
-    case 'organize': {
-      const r = await organizeWindow(msg.windowId);
-      return { kind: 'organize', ...r };
-    }
-    case 'rebuild': {
-      const r = await rebuildWindow(msg.windowId);
-      return { kind: 'rebuild', ...r };
-    }
-    case 'undo': {
-      const r = await undoLast();
-      return { kind: 'undo', ...r };
-    }
+    case 'preview':
+      return { kind: 'preview', ...(await previewWindow(msg.windowId)) };
+    case 'organize':
+      return { kind: 'organize', ...(await organizeWindow(msg.windowId)) };
+    case 'rebuild':
+      return { kind: 'rebuild', ...(await rebuildWindow(msg.windowId)) };
+    case 'dissolve':
+      return { kind: 'dissolve', ...(await dissolveWindow(msg.windowId)) };
     case 'suggestPairs':
       return handleSuggestPairs(msg.windowId);
+    case 'activeTab':
+      return { kind: 'activeTab', info: await describeActiveTab(msg.windowId) };
+    default:
+      return null;
+  }
+}
+
+/** Operations that change a stored correction, then place the tabs it affects. */
+async function routeOverrideAction(
+  msg: Extract<RequestMessage, { kind: 'setOverride' | 'clearOverride' }>
+): Promise<ResponseMessage> {
+  const r =
+    msg.kind === 'setOverride'
+      ? await applyOverride(msg.windowId, msg.url, msg.scope, msg.category)
+      : await clearOverridesForUrl(msg.windowId, msg.url);
+  return {
+    kind: 'overrideApplied',
+    key: r.key,
+    affectedTabs: r.affectedTabs,
+    movedTabs: r.movedTabs
+  };
+}
+
+async function route(msg: RequestMessage): Promise<ResponseMessage> {
+  switch (msg.kind) {
+    case 'undo':
+      return { kind: 'undo', ...(await undoLast()) };
     case 'getSettings':
       return { kind: 'settings', settings: await getSettings() };
     case 'setSettings':
       return { kind: 'settings', settings: await setSettings(msg.patch) };
-    case 'activeTab':
-      return { kind: 'activeTab', info: await describeActiveTab(msg.windowId) };
-    case 'setOverride': {
-      const r = await applyOverride(msg.windowId, msg.url, msg.scope, msg.category);
-      return {
-        kind: 'overrideApplied',
-        key: r.key,
-        affectedTabs: r.affectedTabs,
-        movedTabs: r.movedTabs
-      };
-    }
-    case 'clearOverride': {
-      const r = await clearOverridesForUrl(msg.windowId, msg.url);
-      return {
-        kind: 'overrideApplied',
-        key: r.key,
-        affectedTabs: r.affectedTabs,
-        movedTabs: r.movedTabs
-      };
-    }
+    case 'setOverride':
+    case 'clearOverride':
+      return routeOverrideAction(msg);
     default:
-      return { kind: 'error', message: 'Unknown message.' };
+      return (await routeWindowAction(msg)) ?? { kind: 'error', message: 'Unknown message.' };
   }
 }
 

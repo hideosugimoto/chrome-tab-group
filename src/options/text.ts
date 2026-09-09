@@ -3,9 +3,13 @@
  * Static copy lives in options.html. Same convention as popup/text.ts.
  */
 
+import type { Category } from '../types';
 import type { DomainInputError } from '../domain/domainInput';
+import { CATEGORY_LABEL } from '../constants/categoryLabels';
 
 export const UI = {
+  categoryLabel: (category: Category): string => CATEGORY_LABEL[category],
+
   overrideCount: (n: number): string => `修正 ${n} 件を保存しています`,
   overrideFiltered: (shown: number, total: number): string =>
     `${total} 件中 ${shown} 件を表示`,

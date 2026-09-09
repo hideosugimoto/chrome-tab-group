@@ -5,15 +5,16 @@
  * language: this is a Japanese-first tool, and `chrome.i18n` would
  * fall back to English for anyone running Chrome in English.
  *
- * Category names (Dev / Review / Chat …) stay English on purpose —
- * they are also the tab group titles, and `domain/groupTitle.ts`
- * parses them back to recognize the groups we own.
+ * Category names are shown through CATEGORY_LABEL. The `Category` type
+ * itself stays English — it is the code-level identifier and the key
+ * format for overrides — but nothing user-facing displays it raw.
  *
  * The background never sends prose; it sends codes that this file
  * turns into text.
  */
 
-import type { UndoFailureReason } from '../types';
+import type { Category, UndoFailureReason } from '../types';
+import { CATEGORY_LABEL } from '../constants/categoryLabels';
 import type { ActiveTabExclusion } from '../background/index';
 
 export const UI = {
@@ -38,6 +39,13 @@ export const UI = {
   suggestionCount: (n: number): string => `候補 ${n} 件`,
   noPairs: '適切な候補は見つかりませんでした',
   pairScore: (reason: string, score: number): string => `${reason} · スコア ${score}`,
+
+  categoryLabel: (category: Category): string => CATEGORY_LABEL[category],
+
+  dissolving: '解除しています…',
+  dissolveDone: (groups: number, tabs: number): string =>
+    `${groups} 件のグループを解除し、${tabs} 件のタブをグループから外しました`,
+  dissolveNothing: '解除できるグループがありません',
 
   rebuilding: '作り直しています…',
   rebuildDone: (dissolved: number, moved: number, created: number): string =>

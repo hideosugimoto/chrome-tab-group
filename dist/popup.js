@@ -14,6 +14,21 @@ var CATEGORY_ORDER = [
 ];
 var ALL_CATEGORIES = CATEGORY_ORDER;
 
+// src/constants/categoryLabels.ts
+var CATEGORY_LABEL = {
+  Chat: "\u30C1\u30E3\u30C3\u30C8",
+  Review: "\u30EC\u30D3\u30E5\u30FC",
+  Dev: "\u958B\u767A",
+  Local: "\u30ED\u30FC\u30AB\u30EB",
+  Docs: "\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8",
+  Research: "\u8ABF\u67FB",
+  Cloud: "\u30AF\u30E9\u30A6\u30C9",
+  Data: "\u30C7\u30FC\u30BF",
+  Design: "\u30C7\u30B6\u30A4\u30F3",
+  AI: "AI",
+  Misc: "\u305D\u306E\u4ED6"
+};
+
 // src/popup/text.ts
 var UI = {
   loading: "\u8AAD\u307F\u8FBC\u307F\u4E2D\u2026",
@@ -32,6 +47,10 @@ var UI = {
   suggestionCount: (n) => `\u5019\u88DC ${n} \u4EF6`,
   noPairs: "\u9069\u5207\u306A\u5019\u88DC\u306F\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F",
   pairScore: (reason, score) => `${reason} \xB7 \u30B9\u30B3\u30A2 ${score}`,
+  categoryLabel: (category) => CATEGORY_LABEL[category],
+  dissolving: "\u89E3\u9664\u3057\u3066\u3044\u307E\u3059\u2026",
+  dissolveDone: (groups, tabs) => `${groups} \u4EF6\u306E\u30B0\u30EB\u30FC\u30D7\u3092\u89E3\u9664\u3057\u3001${tabs} \u4EF6\u306E\u30BF\u30D6\u3092\u30B0\u30EB\u30FC\u30D7\u304B\u3089\u5916\u3057\u307E\u3057\u305F`,
+  dissolveNothing: "\u89E3\u9664\u3067\u304D\u308B\u30B0\u30EB\u30FC\u30D7\u304C\u3042\u308A\u307E\u305B\u3093",
   rebuilding: "\u4F5C\u308A\u76F4\u3057\u3066\u3044\u307E\u3059\u2026",
   rebuildDone: (dissolved, moved, created) => `${dissolved} \u4EF6\u306E\u30B0\u30EB\u30FC\u30D7\u3092\u89E3\u9664\u3057\u3001${moved} \u4EF6\u306E\u30BF\u30D6\u3092 ${created} \u4EF6\u306E\u30B0\u30EB\u30FC\u30D7\u306B\u307E\u3068\u3081\u307E\u3057\u305F`,
   rebuildNothing: "\u6574\u7406\u3067\u304D\u308B\u30BF\u30D6\u304C\u3042\u308A\u307E\u305B\u3093\u3067\u3057\u305F",
@@ -156,7 +175,7 @@ function renderCounts(total, counts, skipped) {
       const chip = document.createElement("span");
       chip.className = "count-chip";
       const label = document.createElement("span");
-      label.textContent = c.category;
+      label.textContent = UI.categoryLabel(c.category);
       const num = document.createElement("span");
       num.className = "num";
       num.textContent = String(c.count);
@@ -217,7 +236,7 @@ function populateCategorySelect() {
   for (const category of ALL_CATEGORIES) {
     const opt = document.createElement("option");
     opt.value = category;
-    opt.textContent = category;
+    opt.textContent = UI.categoryLabel(category);
     select.appendChild(opt);
   }
 }
@@ -310,6 +329,21 @@ function wireRebuild() {
     }
   });
 }
+function wireDissolve() {
+  $("btn-dissolve").addEventListener("click", async () => {
+    setStatus(UI.dissolving);
+    const windowId = await getWindowId();
+    const resp = await send({ kind: "dissolve", windowId });
+    if (resp.kind === "dissolve") {
+      setStatus(
+        resp.dissolvedGroups === 0 ? UI.dissolveNothing : UI.dissolveDone(resp.dissolvedGroups, resp.releasedTabs)
+      );
+      await refreshAll();
+    } else if (resp.kind === "error") {
+      setError(resp.message);
+    }
+  });
+}
 function wireSuggest() {
   $("btn-suggest").addEventListener("click", async () => {
     setStatus(UI.scoring);
@@ -350,7 +384,7 @@ function wireCurrentTab() {
       category
     });
     if (resp.kind === "overrideApplied") {
-      setStatus(UI.overrideApplied(resp.key, category, resp.affectedTabs));
+      setStatus(UI.overrideApplied(resp.key, UI.categoryLabel(category), resp.affectedTabs));
       await refreshAll();
     } else if (resp.kind === "error") {
       setError(resp.message);
@@ -388,6 +422,7 @@ function wireSettings() {
   populateCategorySelect();
   wireOrganize();
   wireRebuild();
+  wireDissolve();
   wireSuggest();
   wireUndo();
   wireCurrentTab();
