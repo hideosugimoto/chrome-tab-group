@@ -10,7 +10,13 @@
  *   split-pair suggestions     -> scoring/splitPair.ts
  */
 
-import type { Category, CategoryCount, OverrideScope, Settings } from '../types';
+import type {
+  Category,
+  CategoryCount,
+  OverrideScope,
+  Settings,
+  UndoFailureReason
+} from '../types';
 import type { ActiveTabInfo } from './currentTab';
 import { getSettings, setSettings } from '../storage/store';
 import { getFallbackWindowId, getTabsInWindow } from '../services/tabsService';
@@ -48,7 +54,7 @@ export type ResponseMessage =
       createdGroups: number;
       skippedUserGroupTabs: number;
     }
-  | { kind: 'undo'; ok: boolean; reason?: string }
+  | { kind: 'undo'; ok: boolean; reason?: UndoFailureReason }
   | { kind: 'suggestPairs'; pairs: SerializedPair[] }
   | { kind: 'settings'; settings: Settings }
   | { kind: 'activeTab'; info: ActiveTabInfo | null }

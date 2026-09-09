@@ -952,13 +952,13 @@ async function restoreGroups(snap, alive) {
 }
 async function undoLast() {
   const snap = await getUndoSnapshot();
-  if (!snap) return { ok: false, reason: "Nothing to undo." };
+  if (!snap) return { ok: false, reason: "no-snapshot" };
   const liveTabs = await getTabsInWindow(snap.windowId);
   const liveIds = new Set(liveTabs.map((t) => t.id));
   const alive = snap.tabs.filter((t) => liveIds.has(t.tabId));
   if (alive.length === 0) {
     await setUndoSnapshot(null);
-    return { ok: false, reason: "Snapshot tabs are gone." };
+    return { ok: false, reason: "tabs-gone" };
   }
   try {
     await ungroupTabs(alive.map((t) => t.tabId));
@@ -1018,13 +1018,9 @@ async function tabIdsMatchingKeys(windowId, keys) {
 }
 async function applyOverride(windowId, url, scope, category) {
   const parsed = parseUrl(url);
-  if (!parsed.ok) throw new Error("This tab has no addressable URL.");
+  if (!parsed.ok) throw new Error("no-url");
   const key = overrideKeyFor(parsed.hostname, parsed.pathname, scope);
-  if (key === null) {
-    throw new Error(
-      scope === "hostPath" ? "This URL has no path segment to scope to." : "This URL has no host to scope to."
-    );
-  }
+  if (key === null) throw new Error(scope === "hostPath" ? "no-path-scope" : "no-host-scope");
   const settings = await getSettings();
   await setSettings({
     categoryOverrides: withOverride(settings.categoryOverrides, key, category)
@@ -1040,9 +1036,9 @@ async function applyOverride(windowId, url, scope, category) {
 }
 async function clearOverridesForUrl(windowId, url) {
   const parsed = parseUrl(url);
-  if (!parsed.ok) throw new Error("This tab has no addressable URL.");
+  if (!parsed.ok) throw new Error("no-url");
   const keys = overrideKeysFor(parsed.hostname, parsed.pathname);
-  if (keys.length === 0) throw new Error("Nothing to reset for this URL.");
+  if (keys.length === 0) throw new Error("nothing-to-reset");
   const affected = await tabIdsMatchingKeys(windowId, keys);
   const settings = await getSettings();
   await setSettings({

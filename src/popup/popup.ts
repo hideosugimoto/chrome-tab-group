@@ -10,6 +10,14 @@ import type {
 } from '../background/index';
 import type { Category, CategoryCount, OverrideScope, Settings } from '../types';
 import { ALL_CATEGORIES } from '../constants/categories';
+import {
+  errorText,
+  explainExclusion,
+  explainRule,
+  NOT_CORRECTABLE,
+  UI,
+  undoFailure
+} from './text';
 
 /**
  * Resolve the windowId of the window the popup is anchored to.
@@ -74,15 +82,19 @@ function setStatus(text: string): void {
   $('status').textContent = text;
 }
 
+function setError(message: string): void {
+  setStatus(UI.error(errorText(message)));
+}
+
 // ─── Preview ────────────────────────────────────────────────────────
 
 function renderCounts(total: number, counts: CategoryCount[], skipped: number): void {
-  $('summary').textContent = `${total} tabs in current window`;
+  $('summary').textContent = UI.tabCount(total);
   const root = $('counts');
   root.replaceChildren();
   if (counts.length === 0) {
     const span = document.createElement('span');
-    span.textContent = 'No organizable tabs';
+    span.textContent = UI.noOrganizableTabs;
     span.style.color = 'var(--muted)';
     span.style.fontSize = '11px';
     root.appendChild(span);
@@ -102,7 +114,7 @@ function renderCounts(total: number, counts: CategoryCount[], skipped: number): 
 
   const note = $('skipped');
   if (skipped > 0) {
-    note.textContent = `${skipped} tab(s) left alone — they are in your own groups.`;
+    note.textContent = UI.skippedNote(skipped);
     note.hidden = false;
   } else {
     note.hidden = true;
@@ -116,7 +128,7 @@ function renderPairs(pairs: SerializedPair[]): void {
   if (pairs.length === 0) {
     section.hidden = false;
     const li = document.createElement('li');
-    li.textContent = 'No good pairs found.';
+    li.textContent = UI.noPairs;
     list.appendChild(li);
     return;
   }
@@ -124,7 +136,7 @@ function renderPairs(pairs: SerializedPair[]): void {
     const li = document.createElement('li');
     const reason = document.createElement('div');
     reason.className = 'reason';
-    reason.textContent = `${p.reason} · score ${p.score}`;
+    reason.textContent = UI.pairScore(p.reason, p.score);
     const a = document.createElement('span');
     a.className = 'pair-title';
     a.title = p.aUrl;
@@ -145,7 +157,7 @@ async function refreshPreview(): Promise<void> {
   if (resp.kind === 'preview') {
     renderCounts(resp.totalTabs, resp.counts, resp.skippedUserGroupTabs);
   } else if (resp.kind === 'error') {
-    setStatus(`Error: ${resp.message}`);
+    setError(resp.message);
   }
 }
 
@@ -164,35 +176,6 @@ function populateCategorySelect(): void {
   }
 }
 
-/** Human-readable explanation of why the tab landed in its category. */
-function explainRule(info: ActiveTabInfo): string {
-  const { source, ruleName } = info.classification;
-  switch (source) {
-    case 'override':
-      return `Your correction · ${ruleName ?? ''}`;
-    case 'local':
-      return 'Rule: local environment';
-    case 'fallback':
-      return 'No rule matched — set a category to teach it.';
-    default:
-      return `Rule: ${ruleName ?? source}`;
-  }
-}
-
-/** Why Organize would leave this particular tab alone, if it would. */
-function explainExclusion(info: ActiveTabInfo): string | null {
-  switch (info.exclusion) {
-    case 'unsupported-url':
-      return 'This tab is never organized (browser page).';
-    case 'pinned':
-      return 'Pinned — this tab stays put, but the rule applies to the site.';
-    case 'excluded-domain':
-      return 'Excluded domain — the rule applies, this tab stays put.';
-    default:
-      return null;
-  }
-}
-
 function renderCurrentTab(info: ActiveTabInfo | null): void {
   currentTab = info;
   const categorySelect = $select('ct-category');
@@ -200,7 +183,7 @@ function renderCurrentTab(info: ActiveTabInfo | null): void {
   const resetBtn = $('ct-reset') as HTMLButtonElement;
 
   if (!info) {
-    $('ct-title').textContent = 'No active tab';
+    $('ct-title').textContent = UI.noActiveTab;
     $('ct-reason').textContent = '';
     categorySelect.disabled = true;
     scopeSelect.disabled = true;
@@ -208,7 +191,7 @@ function renderCurrentTab(info: ActiveTabInfo | null): void {
     return;
   }
 
-  $('ct-title').textContent = info.title || info.url || '(untitled)';
+  $('ct-title').textContent = info.title || info.url || UI.untitled;
   $('ct-title').title = info.url;
   categorySelect.value = info.classification.category;
 
@@ -216,10 +199,12 @@ function renderCurrentTab(info: ActiveTabInfo | null): void {
   const pathOption = scopeSelect.querySelector<HTMLOptionElement>('option[value="hostPath"]');
   if (pathOption) {
     pathOption.disabled = !hasPathScope;
-    pathOption.textContent = hasPathScope ? `This path (${info.hostPathKey})` : 'This path (n/a)';
+    pathOption.textContent = hasPathScope
+      ? UI.scopePath(info.hostPathKey ?? '')
+      : UI.scopePathUnavailable;
   }
   const hostOption = scopeSelect.querySelector<HTMLOptionElement>('option[value="host"]');
-  if (hostOption && info.hostKey) hostOption.textContent = `This site (${info.hostKey})`;
+  if (hostOption && info.hostKey) hostOption.textContent = UI.scopeHost(info.hostKey);
 
   // Default the scope to whichever an existing override already uses.
   if (info.activeOverrideKey !== null) {
@@ -230,12 +215,13 @@ function renderCurrentTab(info: ActiveTabInfo | null): void {
   scopeSelect.disabled = !info.correctable;
   resetBtn.hidden = info.activeOverrideKey === null;
 
-  const exclusion = explainExclusion(info);
+  const rule = explainRule(info.classification.source, info.classification.ruleName);
+  const exclusion = explainExclusion(info.exclusion);
   $('ct-reason').textContent = !info.correctable
-    ? 'This tab has no address to build a rule from.'
+    ? NOT_CORRECTABLE
     : exclusion === null
-      ? explainRule(info)
-      : `${explainRule(info)} · ${exclusion}`;
+      ? rule
+      : `${rule} · ${exclusion}`;
 }
 
 async function refreshCurrentTab(): Promise<void> {
@@ -244,7 +230,7 @@ async function refreshCurrentTab(): Promise<void> {
   if (resp.kind === 'activeTab') {
     renderCurrentTab(resp.info);
   } else if (resp.kind === 'error') {
-    setStatus(`Error: ${resp.message}`);
+    setError(resp.message);
   }
 }
 
@@ -268,41 +254,41 @@ async function saveSettings(patch: Partial<Settings>): Promise<void> {
 
 function wireActions(): void {
   $('btn-organize').addEventListener('click', async () => {
-    setStatus('Organizing…');
+    setStatus(UI.organizing);
     const windowId = await getWindowId();
     const resp = await send({ kind: 'organize', windowId });
     if (resp.kind === 'organize') {
       setStatus(
         resp.movedTabs === 0
-          ? 'Everything is already in place.'
-          : `Grouped ${resp.movedTabs} tabs into ${resp.createdGroups} new group(s).`
+          ? UI.organizeNoop
+          : UI.organizeDone(resp.movedTabs, resp.createdGroups)
       );
       await Promise.all([refreshPreview(), refreshCurrentTab()]);
     } else if (resp.kind === 'error') {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
     }
   });
 
   $('btn-suggest').addEventListener('click', async () => {
-    setStatus('Scoring pairs…');
+    setStatus(UI.scoring);
     const windowId = await getWindowId();
     const resp = await send({ kind: 'suggestPairs', windowId });
     if (resp.kind === 'suggestPairs') {
       renderPairs(resp.pairs);
-      setStatus(`${resp.pairs.length} suggestion(s).`);
+      setStatus(UI.suggestionCount(resp.pairs.length));
     } else if (resp.kind === 'error') {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
     }
   });
 
   $('btn-undo').addEventListener('click', async () => {
-    setStatus('Undoing…');
+    setStatus(UI.undoing);
     const resp = await send({ kind: 'undo' });
     if (resp.kind === 'undo') {
-      setStatus(resp.ok ? 'Restored previous state.' : (resp.reason ?? 'Nothing to undo.'));
+      setStatus(resp.ok ? UI.undoDone : undoFailure(resp.reason));
       await Promise.all([refreshPreview(), refreshCurrentTab()]);
     } else if (resp.kind === 'error') {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
     }
   });
 }
@@ -313,7 +299,7 @@ function wireCurrentTab(): void {
     const category = (e.target as HTMLSelectElement).value as Category;
     const scope = $select('ct-scope').value as OverrideScope;
     const windowId = await getWindowId();
-    setStatus('Applying…');
+    setStatus(UI.applying);
     const resp = await send({
       kind: 'setOverride',
       windowId,
@@ -322,10 +308,10 @@ function wireCurrentTab(): void {
       category
     });
     if (resp.kind === 'overrideApplied') {
-      setStatus(`${resp.key} → ${category} (${resp.affectedTabs} tab(s) in this window).`);
+      setStatus(UI.overrideApplied(resp.key, category, resp.affectedTabs));
       await Promise.all([refreshPreview(), refreshCurrentTab()]);
     } else if (resp.kind === 'error') {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
       await refreshCurrentTab();
     }
   });
@@ -333,13 +319,13 @@ function wireCurrentTab(): void {
   $('ct-reset').addEventListener('click', async () => {
     if (!currentTab) return;
     const windowId = await getWindowId();
-    setStatus('Resetting…');
+    setStatus(UI.resetting);
     const resp = await send({ kind: 'clearOverride', windowId, url: currentTab.url });
     if (resp.kind === 'overrideApplied') {
-      setStatus(`Reset ${resp.key} to rule defaults.`);
+      setStatus(UI.overrideReset(resp.key));
       await Promise.all([refreshPreview(), refreshCurrentTab()]);
     } else if (resp.kind === 'error') {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
     }
   });
 }

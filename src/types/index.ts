@@ -117,6 +117,10 @@ export interface UndoSnapshot {
   groups: UndoGroupSnapshot[];
 }
 
+/** Machine-readable reasons an undo could not run. The popup maps
+ *  these to display text; the background never emits prose. */
+export type UndoFailureReason = 'no-snapshot' | 'tabs-gone';
+
 export interface CategoryCount {
   category: Category;
   count: number;

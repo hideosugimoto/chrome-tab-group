@@ -16,6 +16,7 @@ import type {
   ClassifyResult,
   Settings,
   UndoGroupSnapshot,
+  UndoFailureReason,
   UndoSnapshot,
   UndoTabSnapshot
 } from '../types';
@@ -410,9 +411,9 @@ async function restoreGroups(
   if (restored.length > 0) await registerManagedGroups(restored);
 }
 
-export async function undoLast(): Promise<{ ok: boolean; reason?: string }> {
+export async function undoLast(): Promise<{ ok: boolean; reason?: UndoFailureReason }> {
   const snap = await getUndoSnapshot();
-  if (!snap) return { ok: false, reason: 'Nothing to undo.' };
+  if (!snap) return { ok: false, reason: 'no-snapshot' };
 
   const liveTabs = await getTabsInWindow(snap.windowId);
   const liveIds = new Set(liveTabs.map((t) => t.id));
@@ -420,7 +421,7 @@ export async function undoLast(): Promise<{ ok: boolean; reason?: string }> {
 
   if (alive.length === 0) {
     await setUndoSnapshot(null);
-    return { ok: false, reason: 'Snapshot tabs are gone.' };
+    return { ok: false, reason: 'tabs-gone' };
   }
 
   // Ungroup first. Safe: every snapshot tab was one of ours.

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ja">
   <head>
     <meta charset="utf-8" />
     <title>Engineer Tab Organizer</title>
@@ -9,64 +9,64 @@
     <main>
       <header>
         <h1>Engineer Tab Organizer</h1>
-        <p id="summary">Loading…</p>
+        <p id="summary">読み込み中…</p>
       </header>
 
-      <section id="current-tab" class="current-tab" aria-label="Current tab">
+      <section id="current-tab" class="current-tab" aria-label="現在のタブ">
         <p id="ct-title" class="ct-title">—</p>
         <div class="ct-controls">
           <label class="ct-field">
-            <span>Category</span>
+            <span>カテゴリ</span>
             <select id="ct-category"></select>
           </label>
           <label class="ct-field">
-            <span>Applies to</span>
+            <span>適用範囲</span>
             <select id="ct-scope">
-              <option value="host">This site</option>
-              <option value="hostPath">This path</option>
+              <option value="host">このサイト</option>
+              <option value="hostPath">このパス</option>
             </select>
           </label>
         </div>
         <p id="ct-reason" class="ct-reason">—</p>
         <button id="ct-reset" type="button" class="link-btn" hidden>
-          Reset to rule default
+          ルールの判定に戻す
         </button>
       </section>
 
-      <section id="counts" aria-label="Category preview"></section>
+      <section id="counts" aria-label="カテゴリ別の内訳"></section>
       <p id="skipped" class="note" hidden></p>
 
       <section class="actions">
-        <button id="btn-organize" type="button">Organize now</button>
-        <button id="btn-suggest" type="button">Suggest split pairs</button>
-        <button id="btn-undo" type="button">Undo last organize</button>
+        <button id="btn-organize" type="button">今すぐ整理</button>
+        <button id="btn-suggest" type="button">分割候補を提案</button>
+        <button id="btn-undo" type="button">直前の整理を取り消す</button>
       </section>
 
       <section id="pairs" hidden>
-        <h2>Suggested pairs</h2>
+        <h2>分割候補</h2>
         <ul id="pairs-list"></ul>
       </section>
 
       <section class="settings">
-        <h2>Settings</h2>
+        <h2>設定</h2>
         <label>
           <input id="set-ignore-pinned" type="checkbox" />
-          Ignore pinned tabs
+          ピン留めタブは対象外にする
         </label>
         <label>
           <input id="set-keep-active" type="checkbox" />
-          Keep active tab position
+          アクティブなタブの位置を保つ
         </label>
         <label>
           <input id="set-sort-groups" type="checkbox" />
-          Sort groups by category
+          グループをカテゴリ順に並べる
         </label>
         <label>
           <input id="set-adopt-groups" type="checkbox" />
-          Re-adopt my groups after restart
+          再起動後も自分のグループを引き継ぐ
         </label>
         <p class="note">
-          Groups you created yourself are never modified.
+          自分で作ったグループは変更しません。
         </p>
       </section>
 

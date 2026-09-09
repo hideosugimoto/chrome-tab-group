@@ -9,6 +9,9 @@
  * Applying a correction is deliberately surgical — only the tabs that
  * match the affected key move. Pressing "correct" must never reshuffle
  * the whole window.
+ *
+ * Failures throw stable codes rather than prose: display text is the
+ * popup's job (see src/popup/text.ts).
  */
 
 import type { Category, ClassifyResult, OverrideScope } from '../types';
@@ -123,15 +126,9 @@ export async function applyOverride(
   category: Category
 ): Promise<OverrideChangeResult> {
   const parsed = parseUrl(url);
-  if (!parsed.ok) throw new Error('This tab has no addressable URL.');
+  if (!parsed.ok) throw new Error('no-url');
   const key = overrideKeyFor(parsed.hostname, parsed.pathname, scope);
-  if (key === null) {
-    throw new Error(
-      scope === 'hostPath'
-        ? 'This URL has no path segment to scope to.'
-        : 'This URL has no host to scope to.'
-    );
-  }
+  if (key === null) throw new Error(scope === 'hostPath' ? 'no-path-scope' : 'no-host-scope');
 
   const settings = await getSettings();
   await setSettings({
@@ -157,9 +154,9 @@ export async function clearOverridesForUrl(
   url: string
 ): Promise<OverrideChangeResult> {
   const parsed = parseUrl(url);
-  if (!parsed.ok) throw new Error('This tab has no addressable URL.');
+  if (!parsed.ok) throw new Error('no-url');
   const keys = overrideKeysFor(parsed.hostname, parsed.pathname);
-  if (keys.length === 0) throw new Error('Nothing to reset for this URL.');
+  if (keys.length === 0) throw new Error('nothing-to-reset');
 
   const affected = await tabIdsMatchingKeys(windowId, keys);
 

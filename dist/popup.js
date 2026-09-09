@@ -14,6 +14,82 @@ var CATEGORY_ORDER = [
 ];
 var ALL_CATEGORIES = CATEGORY_ORDER;
 
+// src/popup/text.ts
+var UI = {
+  loading: "\u8AAD\u307F\u8FBC\u307F\u4E2D\u2026",
+  noActiveTab: "\u30A2\u30AF\u30C6\u30A3\u30D6\u306A\u30BF\u30D6\u304C\u3042\u308A\u307E\u305B\u3093",
+  untitled: "(\u30BF\u30A4\u30C8\u30EB\u306A\u3057)",
+  tabCount: (total) => `\u3053\u306E\u30A6\u30A3\u30F3\u30C9\u30A6\u306E\u30BF\u30D6: ${total} \u4EF6`,
+  noOrganizableTabs: "\u6574\u7406\u5BFE\u8C61\u306E\u30BF\u30D6\u304C\u3042\u308A\u307E\u305B\u3093",
+  skippedNote: (n) => `${n} \u4EF6\u306F\u81EA\u5206\u3067\u4F5C\u3063\u305F\u30B0\u30EB\u30FC\u30D7\u5185\u306E\u305F\u3081\u5BFE\u8C61\u5916\u3067\u3059`,
+  scopeHost: (key) => `\u3053\u306E\u30B5\u30A4\u30C8\uFF08${key}\uFF09`,
+  scopePath: (key) => `\u3053\u306E\u30D1\u30B9\uFF08${key}\uFF09`,
+  scopePathUnavailable: "\u3053\u306E\u30D1\u30B9\uFF08\u6307\u5B9A\u4E0D\u53EF\uFF09",
+  organizing: "\u6574\u7406\u4E2D\u2026",
+  organizeNoop: "\u3059\u3079\u3066\u6574\u7406\u6E08\u307F\u3067\u3059",
+  organizeDone: (moved, created) => `${moved} \u4EF6\u306E\u30BF\u30D6\u3092\u6574\u7406\u3057\u307E\u3057\u305F\uFF08\u65B0\u898F\u30B0\u30EB\u30FC\u30D7 ${created} \u4EF6\uFF09`,
+  scoring: "\u5019\u88DC\u3092\u8A08\u7B97\u4E2D\u2026",
+  suggestionCount: (n) => `\u5019\u88DC ${n} \u4EF6`,
+  noPairs: "\u9069\u5207\u306A\u5019\u88DC\u306F\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F",
+  pairScore: (reason, score) => `${reason} \xB7 \u30B9\u30B3\u30A2 ${score}`,
+  undoing: "\u53D6\u308A\u6D88\u3057\u4E2D\u2026",
+  undoDone: "\u6574\u7406\u524D\u306E\u72B6\u614B\u306B\u623B\u3057\u307E\u3057\u305F",
+  applying: "\u9069\u7528\u4E2D\u2026",
+  overrideApplied: (key, category, affected) => `${key} \u2192 ${category}\uFF08\u3053\u306E\u30A6\u30A3\u30F3\u30C9\u30A6\u306E ${affected} \u4EF6\u306B\u9069\u7528\uFF09`,
+  resetting: "\u623B\u3057\u3066\u3044\u307E\u3059\u2026",
+  overrideReset: (key) => `${key} \u3092\u30EB\u30FC\u30EB\u306E\u5224\u5B9A\u306B\u623B\u3057\u307E\u3057\u305F`,
+  error: (message) => `\u30A8\u30E9\u30FC: ${message}`
+};
+function explainRule(source, ruleName) {
+  switch (source) {
+    case "override":
+      return `\u3042\u306A\u305F\u306E\u4FEE\u6B63 \xB7 ${ruleName ?? ""}`;
+    case "local":
+      return "\u30EB\u30FC\u30EB: \u30ED\u30FC\u30AB\u30EB\u74B0\u5883";
+    case "fallback":
+      return "\u30EB\u30FC\u30EB\u672A\u4E00\u81F4 \u2014 \u30AB\u30C6\u30B4\u30EA\u3092\u9078\u3076\u3068\u8A18\u61B6\u3057\u307E\u3059";
+    default:
+      return `\u30EB\u30FC\u30EB: ${ruleName ?? source}`;
+  }
+}
+function explainExclusion(exclusion) {
+  switch (exclusion) {
+    case "unsupported-url":
+      return "\u30D6\u30E9\u30A6\u30B6\u5185\u90E8\u30DA\u30FC\u30B8\u306E\u305F\u3081\u6574\u7406\u5BFE\u8C61\u5916\u3067\u3059";
+    case "pinned":
+      return "\u30D4\u30F3\u7559\u3081\u4E2D\u306E\u305F\u3081\u3053\u306E\u30BF\u30D6\u306F\u52D5\u304D\u307E\u305B\u3093\uFF08\u30EB\u30FC\u30EB\u306F\u30B5\u30A4\u30C8\u306B\u9069\u7528\uFF09";
+    case "excluded-domain":
+      return "\u9664\u5916\u30C9\u30E1\u30A4\u30F3\u306E\u305F\u3081\u3053\u306E\u30BF\u30D6\u306F\u52D5\u304D\u307E\u305B\u3093\uFF08\u30EB\u30FC\u30EB\u306F\u9069\u7528\uFF09";
+    default:
+      return null;
+  }
+}
+var NOT_CORRECTABLE = "\u30EB\u30FC\u30EB\u3092\u4F5C\u308C\u308B URL \u304C\u3042\u308A\u307E\u305B\u3093";
+function undoFailure(reason) {
+  switch (reason) {
+    case "no-snapshot":
+      return "\u53D6\u308A\u6D88\u305B\u308B\u64CD\u4F5C\u304C\u3042\u308A\u307E\u305B\u3093";
+    case "tabs-gone":
+      return "\u5BFE\u8C61\u306E\u30BF\u30D6\u304C\u6B8B\u3063\u3066\u3044\u306A\u3044\u305F\u3081\u53D6\u308A\u6D88\u305B\u307E\u305B\u3093";
+    default:
+      return "\u53D6\u308A\u6D88\u305B\u307E\u305B\u3093\u3067\u3057\u305F";
+  }
+}
+function errorText(message) {
+  switch (message) {
+    case "no-url":
+      return "\u3053\u306E\u30BF\u30D6\u306B\u306F\u5BFE\u8C61\u3068\u306A\u308B URL \u304C\u3042\u308A\u307E\u305B\u3093";
+    case "no-host-scope":
+      return "\u3053\u306EURL\u306B\u306F\u30B5\u30A4\u30C8\u5358\u4F4D\u306E\u30EB\u30FC\u30EB\u3092\u4F5C\u308C\u307E\u305B\u3093";
+    case "no-path-scope":
+      return "\u3053\u306EURL\u306B\u306F\u30D1\u30B9\u5358\u4F4D\u306E\u30EB\u30FC\u30EB\u3092\u4F5C\u308C\u307E\u305B\u3093";
+    case "nothing-to-reset":
+      return "\u3053\u306EURL\u306B\u623B\u305B\u308B\u8A2D\u5B9A\u306F\u3042\u308A\u307E\u305B\u3093";
+    default:
+      return message;
+  }
+}
+
 // src/popup/popup.ts
 async function resolvePopupWindowId() {
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -59,13 +135,16 @@ function $checkbox(id) {
 function setStatus(text) {
   $("status").textContent = text;
 }
+function setError(message) {
+  setStatus(UI.error(errorText(message)));
+}
 function renderCounts(total, counts, skipped) {
-  $("summary").textContent = `${total} tabs in current window`;
+  $("summary").textContent = UI.tabCount(total);
   const root = $("counts");
   root.replaceChildren();
   if (counts.length === 0) {
     const span = document.createElement("span");
-    span.textContent = "No organizable tabs";
+    span.textContent = UI.noOrganizableTabs;
     span.style.color = "var(--muted)";
     span.style.fontSize = "11px";
     root.appendChild(span);
@@ -84,7 +163,7 @@ function renderCounts(total, counts, skipped) {
   }
   const note = $("skipped");
   if (skipped > 0) {
-    note.textContent = `${skipped} tab(s) left alone \u2014 they are in your own groups.`;
+    note.textContent = UI.skippedNote(skipped);
     note.hidden = false;
   } else {
     note.hidden = true;
@@ -97,7 +176,7 @@ function renderPairs(pairs) {
   if (pairs.length === 0) {
     section.hidden = false;
     const li = document.createElement("li");
-    li.textContent = "No good pairs found.";
+    li.textContent = UI.noPairs;
     list.appendChild(li);
     return;
   }
@@ -105,7 +184,7 @@ function renderPairs(pairs) {
     const li = document.createElement("li");
     const reason = document.createElement("div");
     reason.className = "reason";
-    reason.textContent = `${p.reason} \xB7 score ${p.score}`;
+    reason.textContent = UI.pairScore(p.reason, p.score);
     const a = document.createElement("span");
     a.className = "pair-title";
     a.title = p.aUrl;
@@ -125,7 +204,7 @@ async function refreshPreview() {
   if (resp.kind === "preview") {
     renderCounts(resp.totalTabs, resp.counts, resp.skippedUserGroupTabs);
   } else if (resp.kind === "error") {
-    setStatus(`Error: ${resp.message}`);
+    setError(resp.message);
   }
 }
 var currentTab = null;
@@ -139,63 +218,39 @@ function populateCategorySelect() {
     select.appendChild(opt);
   }
 }
-function explainRule(info) {
-  const { source, ruleName } = info.classification;
-  switch (source) {
-    case "override":
-      return `Your correction \xB7 ${ruleName ?? ""}`;
-    case "local":
-      return "Rule: local environment";
-    case "fallback":
-      return "No rule matched \u2014 set a category to teach it.";
-    default:
-      return `Rule: ${ruleName ?? source}`;
-  }
-}
-function explainExclusion(info) {
-  switch (info.exclusion) {
-    case "unsupported-url":
-      return "This tab is never organized (browser page).";
-    case "pinned":
-      return "Pinned \u2014 this tab stays put, but the rule applies to the site.";
-    case "excluded-domain":
-      return "Excluded domain \u2014 the rule applies, this tab stays put.";
-    default:
-      return null;
-  }
-}
 function renderCurrentTab(info) {
   currentTab = info;
   const categorySelect = $select("ct-category");
   const scopeSelect = $select("ct-scope");
   const resetBtn = $("ct-reset");
   if (!info) {
-    $("ct-title").textContent = "No active tab";
+    $("ct-title").textContent = UI.noActiveTab;
     $("ct-reason").textContent = "";
     categorySelect.disabled = true;
     scopeSelect.disabled = true;
     resetBtn.hidden = true;
     return;
   }
-  $("ct-title").textContent = info.title || info.url || "(untitled)";
+  $("ct-title").textContent = info.title || info.url || UI.untitled;
   $("ct-title").title = info.url;
   categorySelect.value = info.classification.category;
   const hasPathScope = info.hostPathKey !== null;
   const pathOption = scopeSelect.querySelector('option[value="hostPath"]');
   if (pathOption) {
     pathOption.disabled = !hasPathScope;
-    pathOption.textContent = hasPathScope ? `This path (${info.hostPathKey})` : "This path (n/a)";
+    pathOption.textContent = hasPathScope ? UI.scopePath(info.hostPathKey ?? "") : UI.scopePathUnavailable;
   }
   const hostOption = scopeSelect.querySelector('option[value="host"]');
-  if (hostOption && info.hostKey) hostOption.textContent = `This site (${info.hostKey})`;
+  if (hostOption && info.hostKey) hostOption.textContent = UI.scopeHost(info.hostKey);
   if (info.activeOverrideKey !== null) {
     scopeSelect.value = info.activeOverrideKey.includes("/") ? "hostPath" : "host";
   }
   categorySelect.disabled = !info.correctable;
   scopeSelect.disabled = !info.correctable;
   resetBtn.hidden = info.activeOverrideKey === null;
-  const exclusion = explainExclusion(info);
-  $("ct-reason").textContent = !info.correctable ? "This tab has no address to build a rule from." : exclusion === null ? explainRule(info) : `${explainRule(info)} \xB7 ${exclusion}`;
+  const rule = explainRule(info.classification.source, info.classification.ruleName);
+  const exclusion = explainExclusion(info.exclusion);
+  $("ct-reason").textContent = !info.correctable ? NOT_CORRECTABLE : exclusion === null ? rule : `${rule} \xB7 ${exclusion}`;
 }
 async function refreshCurrentTab() {
   const windowId = await getWindowId();
@@ -203,7 +258,7 @@ async function refreshCurrentTab() {
   if (resp.kind === "activeTab") {
     renderCurrentTab(resp.info);
   } else if (resp.kind === "error") {
-    setStatus(`Error: ${resp.message}`);
+    setError(resp.message);
   }
 }
 async function loadSettings() {
@@ -220,37 +275,37 @@ async function saveSettings(patch) {
 }
 function wireActions() {
   $("btn-organize").addEventListener("click", async () => {
-    setStatus("Organizing\u2026");
+    setStatus(UI.organizing);
     const windowId = await getWindowId();
     const resp = await send({ kind: "organize", windowId });
     if (resp.kind === "organize") {
       setStatus(
-        resp.movedTabs === 0 ? "Everything is already in place." : `Grouped ${resp.movedTabs} tabs into ${resp.createdGroups} new group(s).`
+        resp.movedTabs === 0 ? UI.organizeNoop : UI.organizeDone(resp.movedTabs, resp.createdGroups)
       );
       await Promise.all([refreshPreview(), refreshCurrentTab()]);
     } else if (resp.kind === "error") {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
     }
   });
   $("btn-suggest").addEventListener("click", async () => {
-    setStatus("Scoring pairs\u2026");
+    setStatus(UI.scoring);
     const windowId = await getWindowId();
     const resp = await send({ kind: "suggestPairs", windowId });
     if (resp.kind === "suggestPairs") {
       renderPairs(resp.pairs);
-      setStatus(`${resp.pairs.length} suggestion(s).`);
+      setStatus(UI.suggestionCount(resp.pairs.length));
     } else if (resp.kind === "error") {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
     }
   });
   $("btn-undo").addEventListener("click", async () => {
-    setStatus("Undoing\u2026");
+    setStatus(UI.undoing);
     const resp = await send({ kind: "undo" });
     if (resp.kind === "undo") {
-      setStatus(resp.ok ? "Restored previous state." : resp.reason ?? "Nothing to undo.");
+      setStatus(resp.ok ? UI.undoDone : undoFailure(resp.reason));
       await Promise.all([refreshPreview(), refreshCurrentTab()]);
     } else if (resp.kind === "error") {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
     }
   });
 }
@@ -260,7 +315,7 @@ function wireCurrentTab() {
     const category = e.target.value;
     const scope = $select("ct-scope").value;
     const windowId = await getWindowId();
-    setStatus("Applying\u2026");
+    setStatus(UI.applying);
     const resp = await send({
       kind: "setOverride",
       windowId,
@@ -269,23 +324,23 @@ function wireCurrentTab() {
       category
     });
     if (resp.kind === "overrideApplied") {
-      setStatus(`${resp.key} \u2192 ${category} (${resp.affectedTabs} tab(s) in this window).`);
+      setStatus(UI.overrideApplied(resp.key, category, resp.affectedTabs));
       await Promise.all([refreshPreview(), refreshCurrentTab()]);
     } else if (resp.kind === "error") {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
       await refreshCurrentTab();
     }
   });
   $("ct-reset").addEventListener("click", async () => {
     if (!currentTab) return;
     const windowId = await getWindowId();
-    setStatus("Resetting\u2026");
+    setStatus(UI.resetting);
     const resp = await send({ kind: "clearOverride", windowId, url: currentTab.url });
     if (resp.kind === "overrideApplied") {
-      setStatus(`Reset ${resp.key} to rule defaults.`);
+      setStatus(UI.overrideReset(resp.key));
       await Promise.all([refreshPreview(), refreshCurrentTab()]);
     } else if (resp.kind === "error") {
-      setStatus(`Error: ${resp.message}`);
+      setError(resp.message);
     }
   });
 }
