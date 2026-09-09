@@ -39,6 +39,35 @@ have not run `npm install` yet, run it once.
 If the hook fails, fix the underlying issue (build error, missing
 `node_modules`, etc.) and re-commit. Do not work around it.
 
+## Loading dist/ into Chrome
+
+Load **one** copy, via the real path:
+
+```
+/Volumes/ExternalSSD/develop/chrome-tab-group/dist
+```
+
+`~/develop` is a symlink to `/Volumes/ExternalSSD/develop`, so the same
+folder is reachable two ways. Chrome derives an unpacked extension's ID
+from its folder path *string*, so loading through both paths registers
+the extension twice under different IDs.
+
+That state is worth recognizing, because it does not look like a loading
+mistake: reload appears to hang ("再読み込みします…" never clears), the
+on/off toggle looks unresponsive, and both entries keep serving a stale
+manifest — so testing silently runs against old code. It cost a debugging
+session on 2026-09-09.
+
+If Chrome behaves oddly, check `chrome://extensions` for duplicate
+entries **first**. Remove every copy, then load the real path once,
+reaching it with Cmd+Shift+G in the file dialog rather than navigating
+through `~/develop`. Confirm the right build is live: the description
+should be Japanese.
+
+The repo lives on an external volume, so unmounting the SSD breaks any
+extension loaded from it. `~/develop` is no escape — it points at the
+same drive.
+
 ## Architecture rules
 
 Layered, deliberately. Keep these boundaries intact:
