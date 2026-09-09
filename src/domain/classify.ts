@@ -1,50 +1,87 @@
-import type { Category, ClassifyInput, DomainRule } from '../types';
+import type {
+  Category,
+  ClassifyInput,
+  ClassifyResult,
+  DomainRule
+} from '../types';
 import { parseUrl } from '../utils/url';
 import { isLocalUrl } from '../rules/localPatterns';
 import { DOMAIN_RULES } from '../rules/domainRules';
 import { PATH_RULES } from '../rules/pathRules';
 import { TITLE_RULES } from '../rules/titleRules';
+import { lookupOverride } from './overrides';
+
+export interface ClassifyContext {
+  customRules?: readonly DomainRule[];
+  overrides?: Readonly<Record<string, Category>>;
+}
 
 /**
- * Pure classification function. No Chrome API. No I/O.
+ * Pure classification. No Chrome API. No I/O.
  *
  * Order:
+ *   0. User overrides — explicit user intent beats every rule.
  *   1. Local environment heuristics (URL host/path keywords).
- *   2. Domain rules (host + optional path/title qualifiers).
+ *   2. Custom rules, then built-in domain rules.
  *   3. Domain-agnostic path rules.
  *   4. Title keyword rules.
  *   5. Misc.
  *
- * customRules (from settings) are evaluated *before* the built-in
- * domain rules so users can override defaults without editing source.
+ * Returns the matched rule name so the UI can explain *why* a tab
+ * landed where it did — the thing an AI organizer cannot do.
  */
-export function classify(
+export function classifyDetailed(
   input: ClassifyInput,
-  customRules: readonly DomainRule[] = []
-): Category {
+  context: ClassifyContext = {}
+): ClassifyResult {
   const url = input.url ?? '';
   const title = input.title ?? '';
   const parsed = parseUrl(url);
-  if (!parsed.ok) return 'Misc';
+  if (!parsed.ok) return { category: 'Misc', source: 'fallback', ruleName: null };
+
+  // 0. User overrides win outright.
+  const override = lookupOverride(parsed.hostname, parsed.pathname, context.overrides);
+  if (override) {
+    return { category: override.category, source: 'override', ruleName: override.key };
+  }
 
   // 1. Local environments are never overridden by service domain.
-  if (isLocalUrl(url)) return 'Local';
+  if (isLocalUrl(url)) return { category: 'Local', source: 'local', ruleName: 'local-url' };
 
-  // 2. Custom + built-in domain rules.
-  const allRules = [...customRules, ...DOMAIN_RULES];
-  const sorted = sortByPriority(allRules);
-  const domainHit = sorted.find((r) => matchRule(r, parsed, title, url));
-  if (domainHit) return domainHit.category;
+  // 2. Custom rules first so users can shadow the built-ins.
+  const customRules = context.customRules ?? [];
+  const customHit = sortByPriority(customRules).find((r) => matchRule(r, parsed, title, url));
+  if (customHit) {
+    return { category: customHit.category, source: 'custom', ruleName: customHit.name ?? null };
+  }
+
+  const domainHit = sortByPriority(DOMAIN_RULES).find((r) => matchRule(r, parsed, title, url));
+  if (domainHit) {
+    return { category: domainHit.category, source: 'domain', ruleName: domainHit.name ?? null };
+  }
 
   // 3. Path-only rules.
   const pathHit = PATH_RULES.find((r) => matchRule(r, parsed, title, url));
-  if (pathHit) return pathHit.category;
+  if (pathHit) {
+    return { category: pathHit.category, source: 'path', ruleName: pathHit.name ?? null };
+  }
 
   // 4. Title-only rules.
   const titleHit = TITLE_RULES.find((r) => matchRule(r, parsed, title, url));
-  if (titleHit) return titleHit.category;
+  if (titleHit) {
+    return { category: titleHit.category, source: 'title', ruleName: titleHit.name ?? null };
+  }
 
-  return 'Misc';
+  return { category: 'Misc', source: 'fallback', ruleName: null };
+}
+
+/** Category-only convenience wrapper. */
+export function classify(
+  input: ClassifyInput,
+  customRules: readonly DomainRule[] = [],
+  overrides?: Readonly<Record<string, Category>>
+): Category {
+  return classifyDetailed(input, { customRules, overrides }).category;
 }
 
 function sortByPriority(rules: readonly DomainRule[]): readonly DomainRule[] {

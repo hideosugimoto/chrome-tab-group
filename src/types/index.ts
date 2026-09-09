@@ -19,6 +19,33 @@ export interface ClassifyInput {
   title: string;
 }
 
+/** Which stage of the pipeline decided the category. */
+export type ClassifySource =
+  | 'override'
+  | 'local'
+  | 'custom'
+  | 'domain'
+  | 'path'
+  | 'title'
+  | 'fallback';
+
+/** Explainable classification result. */
+export interface ClassifyResult {
+  category: Category;
+  source: ClassifySource;
+  /** Name of the matched rule, or the override key. Null for fallback. */
+  ruleName: string | null;
+}
+
+/** Granularity of a user override. */
+export type OverrideScope = 'host' | 'hostPath';
+
+export interface OverrideHit {
+  key: string;
+  category: Category;
+  scope: OverrideScope;
+}
+
 /** Rule definition. All fields except `category` are optional matchers. */
 export interface DomainRule {
   /** Matched against parsed URL hostname. */
@@ -42,10 +69,21 @@ export interface Settings {
   ignorePinnedTabs: boolean;
   keepActiveTabPosition: boolean;
   userExcludedDomains: string[];
+  /**
+   * Reorder the groups we own into CATEGORY_ORDER after organizing.
+   * Costs tab movement on every run; turn off for a calmer tab strip.
+   */
+  sortGroupsByCategory: boolean;
+  /**
+   * Re-adopt groups that carry our canonical title + color when the
+   * in-memory registry has been lost (service worker restart).
+   * Off = groups not in the registry are treated as the user's.
+   */
+  adoptMatchingGroups: boolean;
+  /** User corrections. Key -> category. See domain/overrides.ts. */
+  categoryOverrides?: Record<string, Category>;
   /** Reserved for future custom rules editor. */
   customRules?: DomainRule[];
-  /** Reserved: per-URL category overrides. */
-  categoryOverrides?: Record<string, Category>;
   /** Reserved: history of accepted split-pair suggestions. */
   splitPairHistory?: SplitPairHistoryEntry[];
 }
@@ -73,7 +111,9 @@ export interface UndoGroupSnapshot {
 export interface UndoSnapshot {
   windowId: number;
   takenAt: number;
+  /** Only the tabs the operation actually touched. */
   tabs: UndoTabSnapshot[];
+  /** Metadata for the groups those tabs came from. */
   groups: UndoGroupSnapshot[];
 }
 

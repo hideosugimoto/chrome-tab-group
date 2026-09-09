@@ -65,6 +65,46 @@ When adding a new service to the classifier:
 - For URL-context disambiguation (e.g. `/admin` vs `/docs` on the same
   host), use `pathInclude` / `titleInclude`.
 
+## Never touch groups the user made
+
+The extension modifies **only** the tab groups it created itself.
+
+`chrome.tabGroups` gives no way to tell whether a group is one of
+Chrome's *saved* tab groups — `TabGroup` exposes `id`, `windowId`,
+`collapsed`, `color`, `title` and `shared`, and nothing else. So the
+rule is ownership-based, not saved-state-based:
+
+- `src/storage/managedGroups.ts` is the registry of groups we created.
+  It lives in `chrome.storage.session` because Chrome tab group IDs are
+  only valid for the current browser session — persisting them in
+  `local` would risk a stale ID pointing at somebody else's group.
+- A tab whose `groupId` is neither `-1` nor in the registry is **out of
+  scope**. Do not group it, move it, or count it as organizable.
+- `domain/groupTitle.ts#recognizeGroupTitle` is the only fallback for
+  re-adopting our own groups once the registry is gone — it is cleared
+  when the extension is disabled, reloaded or updated, and on browser
+  restart. It requires title **and** color to match. Keep it strict.
+
+Never reintroduce the old "ungroup everything, then rebuild" approach.
+Grouping is differential: `domain/groupPlan.ts` computes the minimum
+set of operations, and tabs already in the right place are not moved.
+
+## Overrides are the user's word
+
+`settings.categoryOverrides` (see `domain/overrides.ts`) records
+one-click corrections from the popup. They are evaluated **before**
+every built-in rule, including the local-environment heuristic. Do not
+add a rule that can beat an override.
+
+## Tests
+
+`npm test` bundles `tests/**/*.test.ts` with esbuild and runs
+`node --test`. No test framework dependency — keep it that way.
+
+Only the pure layers (`domain`, `rules`, `scoring`, `utils`) are under
+test, which is exactly why they must stay free of `chrome.*`. New pure
+logic needs tests in the same commit.
+
 ## Zero-network is non-negotiable
 
 This extension makes no external requests. Do not introduce:

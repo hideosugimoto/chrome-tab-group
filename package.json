@@ -3,10 +3,14 @@
   "version": "0.1.0",
   "private": true,
   "description": "Rule-based, AI-free Chrome tab organizer for engineers.",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
     "typecheck": "tsc --noEmit",
+    "test": "node scripts/run-tests.mjs",
     "prepare": "node -e \"try{require('child_process').execSync('git config core.hooksPath .githooks',{stdio:'ignore'})}catch(e){}\""
   },
   "devDependencies": {

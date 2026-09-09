@@ -30,3 +30,8 @@ export async function moveGroup(groupId: number, index: number): Promise<void> {
 export async function getGroupsInWindow(windowId: number): Promise<chrome.tabGroups.TabGroup[]> {
   return chrome.tabGroups.query({ windowId });
 }
+
+/** Every group in every window. Used to prune the managed-group registry. */
+export async function getAllGroups(): Promise<chrome.tabGroups.TabGroup[]> {
+  return chrome.tabGroups.query({});
+}

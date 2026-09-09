@@ -1,4 +1,5 @@
-import type { Settings, UndoSnapshot } from '../types';
+import type { Category, Settings, UndoSnapshot } from '../types';
+import { ALL_CATEGORIES } from '../constants/categories';
 
 const KEY_SETTINGS = 'settings.v1';
 const KEY_UNDO = 'lastSnapshotForUndo.v1';
@@ -6,13 +7,33 @@ const KEY_UNDO = 'lastSnapshotForUndo.v1';
 export const DEFAULT_SETTINGS: Settings = {
   ignorePinnedTabs: true,
   keepActiveTabPosition: true,
-  userExcludedDomains: []
+  userExcludedDomains: [],
+  sortGroupsByCategory: true,
+  adoptMatchingGroups: true
 };
 
 export async function getSettings(): Promise<Settings> {
   const obj = await chrome.storage.local.get(KEY_SETTINGS);
   const stored = obj[KEY_SETTINGS] as Partial<Settings> | undefined;
   return normalizeSettings(stored);
+}
+
+const CATEGORY_SET = new Set<string>(ALL_CATEGORIES);
+
+/** Keep only entries whose value is a real Category. */
+function normalizeOverrides(raw: unknown): Record<string, Category> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const out: Record<string, Category> = {};
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof value === 'string' && CATEGORY_SET.has(value)) {
+      out[key] = value as Category;
+    }
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function bool(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback;
 }
 
 /**
@@ -23,19 +44,15 @@ export async function getSettings(): Promise<Settings> {
 function normalizeSettings(stored: Partial<Settings> | undefined): Settings {
   const s = stored ?? {};
   return {
-    ignorePinnedTabs: typeof s.ignorePinnedTabs === 'boolean'
-      ? s.ignorePinnedTabs
-      : DEFAULT_SETTINGS.ignorePinnedTabs,
-    keepActiveTabPosition: typeof s.keepActiveTabPosition === 'boolean'
-      ? s.keepActiveTabPosition
-      : DEFAULT_SETTINGS.keepActiveTabPosition,
+    ignorePinnedTabs: bool(s.ignorePinnedTabs, DEFAULT_SETTINGS.ignorePinnedTabs),
+    keepActiveTabPosition: bool(s.keepActiveTabPosition, DEFAULT_SETTINGS.keepActiveTabPosition),
     userExcludedDomains: Array.isArray(s.userExcludedDomains)
       ? s.userExcludedDomains.filter((d): d is string => typeof d === 'string')
       : DEFAULT_SETTINGS.userExcludedDomains,
+    sortGroupsByCategory: bool(s.sortGroupsByCategory, DEFAULT_SETTINGS.sortGroupsByCategory),
+    adoptMatchingGroups: bool(s.adoptMatchingGroups, DEFAULT_SETTINGS.adoptMatchingGroups),
+    categoryOverrides: normalizeOverrides(s.categoryOverrides),
     customRules: Array.isArray(s.customRules) ? s.customRules : undefined,
-    categoryOverrides: s.categoryOverrides && typeof s.categoryOverrides === 'object'
-      ? s.categoryOverrides
-      : undefined,
     splitPairHistory: Array.isArray(s.splitPairHistory) ? s.splitPairHistory : undefined
   };
 }
@@ -44,7 +61,7 @@ export async function setSettings(patch: Partial<Settings>): Promise<Settings> {
   const current = await getSettings();
   const merged: Settings = { ...current, ...patch };
   await chrome.storage.local.set({ [KEY_SETTINGS]: merged });
-  return merged;
+  return normalizeSettings(merged);
 }
 
 export async function getUndoSnapshot(): Promise<UndoSnapshot | null> {

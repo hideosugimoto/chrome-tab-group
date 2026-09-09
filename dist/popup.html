@@ -12,7 +12,29 @@
         <p id="summary">Loading…</p>
       </header>
 
+      <section id="current-tab" class="current-tab" aria-label="Current tab">
+        <p id="ct-title" class="ct-title">—</p>
+        <div class="ct-controls">
+          <label class="ct-field">
+            <span>Category</span>
+            <select id="ct-category"></select>
+          </label>
+          <label class="ct-field">
+            <span>Applies to</span>
+            <select id="ct-scope">
+              <option value="host">This site</option>
+              <option value="hostPath">This path</option>
+            </select>
+          </label>
+        </div>
+        <p id="ct-reason" class="ct-reason">—</p>
+        <button id="ct-reset" type="button" class="link-btn" hidden>
+          Reset to rule default
+        </button>
+      </section>
+
       <section id="counts" aria-label="Category preview"></section>
+      <p id="skipped" class="note" hidden></p>
 
       <section class="actions">
         <button id="btn-organize" type="button">Organize now</button>
@@ -35,6 +57,17 @@
           <input id="set-keep-active" type="checkbox" />
           Keep active tab position
         </label>
+        <label>
+          <input id="set-sort-groups" type="checkbox" />
+          Sort groups by category
+        </label>
+        <label>
+          <input id="set-adopt-groups" type="checkbox" />
+          Re-adopt my groups after restart
+        </label>
+        <p class="note">
+          Groups you created yourself are never modified.
+        </p>
       </section>
 
       <p id="status" class="status"></p>

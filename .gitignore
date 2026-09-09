@@ -29,3 +29,6 @@ pnpm-debug.log*
 # NOTE: dist/ is intentionally NOT ignored.
 # It is the prebuilt Chrome extension that end users load directly.
 # Always run `npm run build` before committing changes under src/.
+
+# test build output
+/.test-build

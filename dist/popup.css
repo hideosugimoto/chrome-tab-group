@@ -93,3 +93,47 @@ h2 { font-size: 12px; margin: 12px 0 6px; color: var(--muted); text-transform: u
 .settings label { display: flex; align-items: center; gap: 6px; font-size: 12px; margin: 4px 0; }
 
 .status { margin: 8px 0 0; min-height: 14px; font-size: 11px; color: var(--muted); }
+
+/* ── Current tab: one-click category correction ─────────────────── */
+.current-tab {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  margin-bottom: 10px;
+}
+.ct-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ct-controls { display: flex; gap: 6px; }
+.ct-field { display: flex; flex-direction: column; gap: 2px; flex: 1 1 0; min-width: 0; }
+.ct-field span { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.ct-field select {
+  width: 100%;
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--btn-bg);
+  color: var(--fg);
+}
+.ct-reason { margin: 6px 0 0; font-size: 11px; color: var(--muted); }
+.link-btn {
+  appearance: none;
+  border: 0;
+  background: none;
+  padding: 4px 0 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.link-btn:hover { text-decoration: underline; }
+
+.note { margin: 0 0 8px; font-size: 11px; color: var(--muted); }
+.settings .note { margin: 6px 0 0; }

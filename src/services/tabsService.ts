@@ -52,6 +52,17 @@ export async function getTabsInWindow(windowId: number): Promise<chrome.tabs.Tab
   return chrome.tabs.query({ windowId });
 }
 
+export async function getTab(tabId: number): Promise<chrome.tabs.Tab> {
+  return chrome.tabs.get(tabId);
+}
+
+export async function getActiveTabInWindow(
+  windowId: number
+): Promise<chrome.tabs.Tab | undefined> {
+  const [tab] = await chrome.tabs.query({ windowId, active: true });
+  return tab;
+}
+
 export async function moveTabs(tabIds: number[], index: number): Promise<void> {
   if (tabIds.length === 0) return;
   await chrome.tabs.move(tabIds, { index });
