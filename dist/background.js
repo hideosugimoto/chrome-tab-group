@@ -22,6 +22,7 @@ var DEFAULT_SETTINGS = {
   keepActiveTabPosition: true,
   userExcludedDomains: [],
   sortGroupsByCategory: true,
+  sortTabsByDomain: true,
   adoptMatchingGroups: true,
   // Off by default: moving the user's tabs without being asked is
   // exactly the surprise this extension is built to avoid.
@@ -53,6 +54,7 @@ function normalizeSettings(stored) {
     keepActiveTabPosition: bool(s.keepActiveTabPosition, DEFAULT_SETTINGS.keepActiveTabPosition),
     userExcludedDomains: Array.isArray(s.userExcludedDomains) ? s.userExcludedDomains.filter((d) => typeof d === "string") : DEFAULT_SETTINGS.userExcludedDomains,
     sortGroupsByCategory: bool(s.sortGroupsByCategory, DEFAULT_SETTINGS.sortGroupsByCategory),
+    sortTabsByDomain: bool(s.sortTabsByDomain, DEFAULT_SETTINGS.sortTabsByDomain),
     adoptMatchingGroups: bool(s.adoptMatchingGroups, DEFAULT_SETTINGS.adoptMatchingGroups),
     autoGroupEnabled: bool(s.autoGroupEnabled, DEFAULT_SETTINGS.autoGroupEnabled),
     categoryOverrides: normalizeOverrides(s.categoryOverrides),
@@ -636,6 +638,192 @@ function planGrouping(tabs, managedGroups, options = {}) {
   return { assignments, creations, touchedTabIds };
 }
 
+// src/constants/tabs.ts
+var UNGROUPED = -1;
+
+// src/domain/tabOrder.ts
+function siteKey(url) {
+  const parsed = parseUrl(url ?? "");
+  if (!parsed.ok || !parsed.hostname) return "";
+  return rootDomain(parsed.hostname);
+}
+function planDomainClusterOrder(tabs) {
+  const clusters = /* @__PURE__ */ new Map();
+  for (const tab of tabs) {
+    const key = siteKey(tab.url);
+    const bucket = clusters.get(key);
+    if (bucket) bucket.push(tab.tabId);
+    else clusters.set(key, [tab.tabId]);
+  }
+  return [...clusters.values()].flat();
+}
+function planTabMoves(currentOrder, desiredOrder) {
+  const working = [...currentOrder];
+  const moves = [];
+  for (let offset = 0; offset < desiredOrder.length; offset++) {
+    const tabId = desiredOrder[offset];
+    if (tabId === void 0) continue;
+    if (working[offset] === tabId) continue;
+    const from = working.indexOf(tabId);
+    if (from < 0) continue;
+    working.splice(from, 1);
+    working.splice(offset, 0, tabId);
+    moves.push({ tabId, offset });
+  }
+  return moves;
+}
+function planActiveTabRestore(input) {
+  if (input.isInOurGroup) return null;
+  if (input.tabCount <= 0) return null;
+  return Math.max(0, Math.min(input.originalIndex, input.tabCount - 1));
+}
+
+// src/services/tabGroupsService.ts
+async function groupTabs(tabIds, windowId, groupId) {
+  if (tabIds.length === 0) return -1;
+  if (groupId !== void 0 && groupId !== -1) {
+    return chrome.tabs.group({ tabIds, groupId });
+  }
+  return chrome.tabs.group({ tabIds, createProperties: { windowId } });
+}
+async function updateGroup(groupId, updates) {
+  if (groupId === -1) return;
+  await chrome.tabGroups.update(groupId, updates);
+}
+async function moveGroup(groupId, index) {
+  if (groupId === -1) return;
+  await chrome.tabGroups.move(groupId, { index });
+}
+async function getGroupsInWindow(windowId) {
+  return chrome.tabGroups.query({ windowId });
+}
+async function getAllGroups() {
+  return chrome.tabGroups.query({});
+}
+
+// src/storage/managedGroups.ts
+var KEY = "managedGroups.v1";
+async function readMap() {
+  const obj = await chrome.storage.session.get(KEY);
+  const raw = obj[KEY];
+  return raw && typeof raw === "object" ? raw : {};
+}
+async function writeMap(map) {
+  await chrome.storage.session.set({ [KEY]: map });
+}
+async function getManagedGroups() {
+  const map = await readMap();
+  const out = /* @__PURE__ */ new Map();
+  for (const [id, category] of Object.entries(map)) {
+    const n = Number(id);
+    if (Number.isInteger(n)) out.set(n, category);
+  }
+  return out;
+}
+async function registerManagedGroups(entries) {
+  if (entries.length === 0) return;
+  const map = await readMap();
+  const next = { ...map };
+  for (const e of entries) {
+    if (e.groupId !== -1) next[String(e.groupId)] = e.category;
+  }
+  await writeMap(next);
+}
+async function pruneManagedGroups(liveGroupIds) {
+  const map = await readMap();
+  const next = {};
+  let changed = false;
+  for (const [id, category] of Object.entries(map)) {
+    if (liveGroupIds.has(Number(id))) next[id] = category;
+    else changed = true;
+  }
+  if (changed) await writeMap(next);
+}
+
+// src/background/arrange.ts
+async function sortManagedGroups(windowId) {
+  const registry = await getManagedGroups();
+  const liveGroups = await getGroupsInWindow(windowId);
+  const byCategory = /* @__PURE__ */ new Map();
+  for (const g of liveGroups) {
+    const category = registry.get(g.id);
+    if (category !== void 0 && !byCategory.has(category)) byCategory.set(category, g.id);
+  }
+  for (const category of CATEGORY_ORDER) {
+    const groupId = byCategory.get(category);
+    if (groupId === void 0) continue;
+    try {
+      await moveGroup(groupId, -1);
+    } catch (e) {
+      console.warn("group move failed:", category, e);
+    }
+  }
+}
+async function clusterTabsWithinManagedGroups(windowId) {
+  const registry = await getManagedGroups();
+  const tabs = [...await getTabsInWindow(windowId)].sort((a, b) => a.index - b.index);
+  const byGroup = /* @__PURE__ */ new Map();
+  for (const tab of tabs) {
+    if (typeof tab.id !== "number") continue;
+    if ((tab.groupId ?? UNGROUPED) === UNGROUPED) continue;
+    if (!registry.has(tab.groupId)) continue;
+    const bucket = byGroup.get(tab.groupId);
+    if (bucket) bucket.push(tab);
+    else byGroup.set(tab.groupId, [tab]);
+  }
+  for (const [groupId, groupTabsInOrder] of byGroup) {
+    const start = Math.min(...groupTabsInOrder.map((t) => t.index));
+    const current = groupTabsInOrder.map((t) => t.id);
+    const desired = planDomainClusterOrder(
+      groupTabsInOrder.map((t) => ({ tabId: t.id, url: t.url }))
+    );
+    const moves = planTabMoves(current, desired);
+    if (moves.length === 0) continue;
+    for (const move of moves) {
+      try {
+        await moveSingleTab(move.tabId, start + move.offset);
+      } catch (e) {
+        console.warn("tab cluster move failed:", move.tabId, e);
+      }
+    }
+    await repairGroupMembership(groupId, windowId, current);
+  }
+}
+async function repairGroupMembership(groupId, windowId, expectedTabIds) {
+  try {
+    const after = await getTabsInWindow(windowId);
+    const byId = new Map(after.map((t) => [t.id, t]));
+    const escaped = expectedTabIds.filter((id) => {
+      const tab = byId.get(id);
+      return tab !== void 0 && tab.groupId !== groupId;
+    });
+    if (escaped.length === 0) return;
+    console.warn("reorder ungrouped tabs, re-grouping:", escaped);
+    await groupTabs(escaped, windowId, groupId);
+  } catch (e) {
+    console.warn("group membership repair failed:", groupId, e);
+  }
+}
+async function restoreActiveTabPosition(activeTab, windowId) {
+  if (!activeTab || typeof activeTab.id !== "number" || typeof activeTab.index !== "number") return;
+  if (activeTab.pinned) return;
+  if (isExcludedUrl(activeTab.url)) return;
+  try {
+    const registry = await getManagedGroups();
+    const after = await getTabsInWindow(windowId);
+    const now = after.find((t) => t.id === activeTab.id);
+    const groupId = now?.groupId ?? UNGROUPED;
+    const target = planActiveTabRestore({
+      originalIndex: activeTab.index,
+      tabCount: after.length,
+      isInOurGroup: groupId !== UNGROUPED && registry.has(groupId)
+    });
+    if (target === null) return;
+    await moveSingleTab(activeTab.id, target);
+  } catch {
+  }
+}
+
 // src/constants/categoryLabels.ts
 var CATEGORY_LABEL = {
   Chat: "\u30C1\u30E3\u30C3\u30C8",
@@ -702,11 +890,11 @@ function needsTitleRefresh(currentTitle, category, windowOrdinal) {
 }
 
 // src/domain/undoPlan.ts
-var UNGROUPED = -1;
+var UNGROUPED2 = -1;
 function planUndoRegroup(tabs, groups, liveGroupIds) {
   const byOldGroup = /* @__PURE__ */ new Map();
   for (const t of tabs) {
-    if (t.groupId === UNGROUPED) continue;
+    if (t.groupId === UNGROUPED2) continue;
     const arr = byOldGroup.get(t.groupId);
     if (arr) arr.push(t.tabId);
     else byOldGroup.set(t.groupId, [t.tabId]);
@@ -722,7 +910,7 @@ function planUndoRegroup(tabs, groups, liveGroupIds) {
 }
 
 // src/domain/rebuildPlan.ts
-var UNGROUPED2 = -1;
+var UNGROUPED3 = -1;
 function selectRebuildTabs(tabs, ownedGroupIds) {
   const toUngroup = [];
   const touched = [];
@@ -732,75 +920,12 @@ function selectRebuildTabs(tabs, ownedGroupIds) {
       touched.push(tab.tabId);
       continue;
     }
-    if (tab.groupId === UNGROUPED2 && tab.organizable) touched.push(tab.tabId);
+    if (tab.groupId === UNGROUPED3 && tab.organizable) touched.push(tab.tabId);
   }
   return { toUngroup, touched };
 }
 
-// src/storage/managedGroups.ts
-var KEY = "managedGroups.v1";
-async function readMap() {
-  const obj = await chrome.storage.session.get(KEY);
-  const raw = obj[KEY];
-  return raw && typeof raw === "object" ? raw : {};
-}
-async function writeMap(map) {
-  await chrome.storage.session.set({ [KEY]: map });
-}
-async function getManagedGroups() {
-  const map = await readMap();
-  const out = /* @__PURE__ */ new Map();
-  for (const [id, category] of Object.entries(map)) {
-    const n = Number(id);
-    if (Number.isInteger(n)) out.set(n, category);
-  }
-  return out;
-}
-async function registerManagedGroups(entries) {
-  if (entries.length === 0) return;
-  const map = await readMap();
-  const next = { ...map };
-  for (const e of entries) {
-    if (e.groupId !== -1) next[String(e.groupId)] = e.category;
-  }
-  await writeMap(next);
-}
-async function pruneManagedGroups(liveGroupIds) {
-  const map = await readMap();
-  const next = {};
-  let changed = false;
-  for (const [id, category] of Object.entries(map)) {
-    if (liveGroupIds.has(Number(id))) next[id] = category;
-    else changed = true;
-  }
-  if (changed) await writeMap(next);
-}
-
-// src/services/tabGroupsService.ts
-async function groupTabs(tabIds, windowId, groupId) {
-  if (tabIds.length === 0) return -1;
-  if (groupId !== void 0 && groupId !== -1) {
-    return chrome.tabs.group({ tabIds, groupId });
-  }
-  return chrome.tabs.group({ tabIds, createProperties: { windowId } });
-}
-async function updateGroup(groupId, updates) {
-  if (groupId === -1) return;
-  await chrome.tabGroups.update(groupId, updates);
-}
-async function moveGroup(groupId, index) {
-  if (groupId === -1) return;
-  await chrome.tabGroups.move(groupId, { index });
-}
-async function getGroupsInWindow(windowId) {
-  return chrome.tabGroups.query({ windowId });
-}
-async function getAllGroups() {
-  return chrome.tabGroups.query({});
-}
-
 // src/background/organize.ts
-var UNGROUPED3 = -1;
 async function resolveManagedGroups(windowId, settings, allowAdoption = true) {
   const liveGroups = await getGroupsInWindow(windowId);
   const registry = await getManagedGroups();
@@ -842,8 +967,8 @@ function selectTouchableTabs(tabs, settings, managedIds) {
   let skippedUserGroupTabs = 0;
   for (const tab of tabs) {
     if (!isOrganizableTab(tab, settings)) continue;
-    const groupId = tab.groupId ?? UNGROUPED3;
-    if (groupId !== UNGROUPED3 && !managedIds.has(groupId)) {
+    const groupId = tab.groupId ?? UNGROUPED;
+    if (groupId !== UNGROUPED && !managedIds.has(groupId)) {
       skippedUserGroupTabs += 1;
       continue;
     }
@@ -856,11 +981,11 @@ function buildSnapshot(windowId, touchedTabIds, tabs, liveGroups) {
   const tabSnaps = tabs.filter((t) => typeof t.id === "number" && touched.has(t.id)).map((t) => ({
     tabId: t.id,
     index: t.index,
-    groupId: t.groupId ?? UNGROUPED3,
+    groupId: t.groupId ?? UNGROUPED,
     pinned: t.pinned ?? false
   }));
   const neededGroupIds = new Set(
-    tabSnaps.map((t) => t.groupId).filter((id) => id !== UNGROUPED3)
+    tabSnaps.map((t) => t.groupId).filter((id) => id !== UNGROUPED)
   );
   const groupSnaps = liveGroups.filter((g) => neededGroupIds.has(g.id)).map((g) => ({
     groupId: g.id,
@@ -885,7 +1010,7 @@ async function applyPlan(plan, windowId, windowOrdinal) {
   for (const c of plan.creations) {
     try {
       const groupId = await groupTabs(c.tabIds, windowId);
-      if (groupId === UNGROUPED3) continue;
+      if (groupId === UNGROUPED) continue;
       await updateGroup(groupId, {
         title: formatGroupTitle(c.category, windowOrdinal),
         color: CATEGORY_COLOR[c.category]
@@ -914,35 +1039,6 @@ async function refreshGroupTitles(managed, liveGroups, windowOrdinal) {
     }
   }
 }
-async function sortManagedGroups(windowId) {
-  const registry = await getManagedGroups();
-  const liveGroups = await getGroupsInWindow(windowId);
-  const byCategory = /* @__PURE__ */ new Map();
-  for (const g of liveGroups) {
-    const category = registry.get(g.id);
-    if (category !== void 0 && !byCategory.has(category)) byCategory.set(category, g.id);
-  }
-  for (const category of CATEGORY_ORDER) {
-    const groupId = byCategory.get(category);
-    if (groupId === void 0) continue;
-    try {
-      await moveGroup(groupId, -1);
-    } catch (e) {
-      console.warn("group move failed:", category, e);
-    }
-  }
-}
-async function restoreActiveTabPosition(activeTab, windowId) {
-  if (!activeTab || typeof activeTab.id !== "number" || typeof activeTab.index !== "number") return;
-  if (activeTab.pinned) return;
-  if (isExcludedUrl(activeTab.url)) return;
-  try {
-    const after = await getTabsInWindow(windowId);
-    const target = Math.max(0, Math.min(activeTab.index, after.length - 1));
-    await moveSingleTab(activeTab.id, target);
-  } catch {
-  }
-}
 async function previewWindow(windowId) {
   const settings = await getSettings();
   const { managed } = await resolveManagedGroups(windowId, settings);
@@ -965,7 +1061,7 @@ function buildPlan(touchable, managed, options) {
   const planTabs = scoped.map((c) => ({
     tabId: c.tab.id,
     category: c.result.category,
-    currentGroupId: c.tab.groupId ?? UNGROUPED3
+    currentGroupId: c.tab.groupId ?? UNGROUPED
   }));
   return planGrouping(planTabs, managed, { allowNewGroups: !options.assignOnly });
 }
@@ -995,6 +1091,9 @@ async function organizeWindow(windowId, options = {}) {
   if (settings.sortGroupsByCategory && !surgical) {
     await sortManagedGroups(windowId);
   }
+  if (settings.sortTabsByDomain && !surgical) {
+    await clusterTabsWithinManagedGroups(windowId);
+  }
   if (settings.keepActiveTabPosition && !surgical) {
     await restoreActiveTabPosition(activeTab, windowId);
   }
@@ -1019,7 +1118,7 @@ async function restoreGroups(snap, alive) {
         snap.windowId,
         step.reuseGroupId ?? void 0
       );
-      if (groupId === UNGROUPED3) continue;
+      if (groupId === UNGROUPED) continue;
       if (step.meta) {
         await updateGroup(groupId, {
           title: step.meta.title,
@@ -1044,7 +1143,7 @@ async function dissolveOwnedGroups(windowId, snapshotStrays) {
   const { toUngroup, touched } = selectRebuildTabs(
     tabs.filter((t) => typeof t.id === "number").map((t) => ({
       tabId: t.id,
-      groupId: t.groupId ?? UNGROUPED3,
+      groupId: t.groupId ?? UNGROUPED,
       organizable: isOrganizableTab(t, settings)
     })),
     ownedIds

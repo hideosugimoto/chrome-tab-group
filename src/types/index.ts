@@ -75,6 +75,12 @@ export interface Settings {
    */
   sortGroupsByCategory: boolean;
   /**
+   * Inside each group we own, keep tabs from the same site adjacent.
+   * Like sortGroupsByCategory this costs tab movement, and for the
+   * same reason it is skipped on scoped and automatic runs.
+   */
+  sortTabsByDomain: boolean;
+  /**
    * Re-adopt groups that carry our canonical title + color when the
    * registry has been lost (extension reload/update, browser restart).
    * Off = groups not in the registry are treated as the user's.

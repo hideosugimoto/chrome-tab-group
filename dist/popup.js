@@ -294,6 +294,7 @@ async function loadSettings() {
   $checkbox("set-ignore-pinned").checked = s.ignorePinnedTabs;
   $checkbox("set-keep-active").checked = s.keepActiveTabPosition;
   $checkbox("set-sort-groups").checked = s.sortGroupsByCategory;
+  $checkbox("set-sort-tabs").checked = s.sortTabsByDomain;
   $checkbox("set-adopt-groups").checked = s.adoptMatchingGroups;
 }
 async function saveSettings(patch) {
@@ -416,6 +417,7 @@ function wireSettings() {
   bind("set-ignore-pinned", "ignorePinnedTabs", true);
   bind("set-keep-active", "keepActiveTabPosition", false);
   bind("set-sort-groups", "sortGroupsByCategory", false);
+  bind("set-sort-tabs", "sortTabsByDomain", false);
   bind("set-adopt-groups", "adoptMatchingGroups", true);
 }
 (async function main() {

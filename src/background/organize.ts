@@ -24,6 +24,11 @@ import { classifyDetailed } from '../domain/classify';
 import { isExcludedUrl, isUserExcludedDomain } from '../domain/exclusion';
 import { planGrouping, type ManagedGroup, type PlanTab } from '../domain/groupPlan';
 import {
+  clusterTabsWithinManagedGroups,
+  restoreActiveTabPosition,
+  sortManagedGroups
+} from './arrange';
+import {
   formatGroupTitle,
   needsTitleRefresh,
   recognizeGroupTitle
@@ -32,6 +37,7 @@ import { planUndoRegroup } from '../domain/undoPlan';
 import { selectRebuildTabs } from '../domain/rebuildPlan';
 import { CATEGORY_COLOR } from '../constants/colors';
 import { CATEGORY_ORDER } from '../constants/categories';
+import { UNGROUPED } from '../constants/tabs';
 import { getSettings, getUndoSnapshot, setUndoSnapshot } from '../storage/store';
 import {
   getManagedGroups,
@@ -49,11 +55,9 @@ import {
   getAllGroups,
   getGroupsInWindow,
   groupTabs,
-  moveGroup,
   updateGroup
 } from '../services/tabGroupsService';
 
-const UNGROUPED = -1;
 
 export interface OrganizeResult {
   movedTabs: number;
@@ -277,50 +281,6 @@ async function refreshGroupTitles(
   }
 }
 
-/**
- * Reorder the groups we own into CATEGORY_ORDER by moving each to the
- * right end in turn. Only our groups move; the user's groups keep
- * their positions relative to each other.
- */
-async function sortManagedGroups(windowId: number): Promise<void> {
-  const registry = await getManagedGroups();
-  const liveGroups = await getGroupsInWindow(windowId);
-  const byCategory = new Map<Category, number>();
-  for (const g of liveGroups) {
-    const category = registry.get(g.id);
-    if (category !== undefined && !byCategory.has(category)) byCategory.set(category, g.id);
-  }
-  for (const category of CATEGORY_ORDER) {
-    const groupId = byCategory.get(category);
-    if (groupId === undefined) continue;
-    try {
-      await moveGroup(groupId, -1);
-    } catch (e) {
-      console.warn('group move failed:', category, e);
-    }
-  }
-}
-
-/**
- * Best-effort: nudge the active tab back toward its pre-organize index.
- * Skipped for pinned / excluded tabs (they should never be moved).
- */
-async function restoreActiveTabPosition(
-  activeTab: chrome.tabs.Tab | undefined,
-  windowId: number
-): Promise<void> {
-  if (!activeTab || typeof activeTab.id !== 'number' || typeof activeTab.index !== 'number') return;
-  if (activeTab.pinned) return;
-  if (isExcludedUrl(activeTab.url)) return;
-
-  try {
-    const after = await getTabsInWindow(windowId);
-    const target = Math.max(0, Math.min(activeTab.index, after.length - 1));
-    await moveSingleTab(activeTab.id, target);
-  } catch {
-    // best-effort only
-  }
-}
 
 // ─── Public operations ──────────────────────────────────────────────
 
@@ -432,6 +392,10 @@ export async function organizeWindow(
   const surgical = options.restrictToTabIds !== undefined || options.skipSort === true;
   if (settings.sortGroupsByCategory && !surgical) {
     await sortManagedGroups(windowId);
+  }
+  // After the groups have settled, so the index offsets are final.
+  if (settings.sortTabsByDomain && !surgical) {
+    await clusterTabsWithinManagedGroups(windowId);
   }
   if (settings.keepActiveTabPosition && !surgical) {
     await restoreActiveTabPosition(activeTab, windowId);

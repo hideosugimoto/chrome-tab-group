@@ -139,6 +139,44 @@ group we never recorded stays the user's. `domain/rebuildPlan.ts`
 decides which tabs it releases and which it must snapshot; get that
 set wrong and undo silently cannot restore the window.
 
+## The passes that move tabs on purpose
+
+They live together in `background/arrange.ts`, apart from
+`organize.ts`, because they share the property that makes them
+dangerous: they run *after* the plan has been applied and they move
+tabs the plan itself did not touch.
+
+`sortManagedGroups` (groups into `CATEGORY_ORDER`) and
+`clusterTabsWithinManagedGroups` (same-site tabs adjacent inside each
+group) are gated:
+
+- each has its own setting (`sortGroupsByCategory`, `sortTabsByDomain`)
+- both are skipped whenever the run is `surgical` — a scoped
+  `restrictToTabIds` run, or `skipSort`. The automatic pass and a
+  single one-click correction must never rearrange the strip.
+
+Known limitation, inherited by both: the undo snapshot records only
+`plan.touchedTabIds`, so a tab these passes moved without the plan
+touching it is not restored by undo.
+
+`chrome.tabs.move` documents **nothing** about tab groups — the API
+reference does not mention them in `move()`. Do not assume a tab stays
+grouped because it landed inside the group's index range.
+`clusterTabsWithinManagedGroups` re-reads the window afterwards and
+re-groups anything that fell out. Keep that check.
+
+`chrome.tabs.query` likewise documents no ordering for its result, only
+that `Tab.index` is the position in the window. `arrange.ts` is the one
+place that cares about strip order, so it sorts by `index` instead of
+trusting the array it gets back.
+
+`restoreActiveTabPosition` (`keepActiveTabPosition`) deliberately does
+**nothing** when the active tab ended up in a group we own. Restoring a
+raw pre-organize index would drag that tab straight back out of the
+group — and out of its site cluster. The setting still protects an
+active tab that stayed ungrouped. The decision is pure and tested:
+`domain/tabOrder.ts#planActiveTabRestore`.
+
 ## Automatic grouping stays quiet
 
 `background/autoGroup.ts` runs on tab events. It is off by default and
