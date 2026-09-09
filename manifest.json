@@ -12,6 +12,10 @@
     "default_title": "Engineer Tab Organizer",
     "default_popup": "popup.html"
   },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
   "commands": {
     "organize-now": {
       "suggested_key": { "default": "Ctrl+Shift+O", "mac": "Command+Shift+O" },

@@ -22,13 +22,16 @@ const common = {
 
 const entries = [
   { in: 'src/background/index.ts', out: 'background' },
-  { in: 'src/popup/popup.ts', out: 'popup' }
+  { in: 'src/popup/popup.ts', out: 'popup' },
+  { in: 'src/options/options.ts', out: 'options' }
 ];
 
 async function copyStatic() {
   await cp('manifest.json', path.join(outdir, 'manifest.json'));
   await cp('src/popup/popup.html', path.join(outdir, 'popup.html'));
   await cp('src/popup/popup.css', path.join(outdir, 'popup.css'));
+  await cp('src/options/options.html', path.join(outdir, 'options.html'));
+  await cp('src/options/options.css', path.join(outdir, 'options.css'));
   if (existsSync('icons')) {
     await cp('icons', path.join(outdir, 'icons'), { recursive: true });
   }

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <title>Engineer Tab Organizer の設定</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Engineer Tab Organizer の設定</h1>
+        <p class="lead">
+          自分で作ったタブグループは、どの設定でも変更しません。
+        </p>
+      </header>
+
+      <section aria-labelledby="h-overrides">
+        <h2 id="h-overrides">カテゴリの修正</h2>
+        <p class="lead">
+          ポップアップでカテゴリを変更すると、ここに記録されます。
+          組み込みのルールより優先されます。
+        </p>
+
+        <div class="toolbar">
+          <label class="grow">
+            <span class="sr-only">絞り込み</span>
+            <input id="ov-filter" type="search" placeholder="サイト名で絞り込み" />
+          </label>
+          <button id="ov-clear-all" type="button" class="danger">すべて削除</button>
+        </div>
+
+        <table id="ov-table">
+          <thead>
+            <tr>
+              <th scope="col">対象</th>
+              <th scope="col">範囲</th>
+              <th scope="col">カテゴリ</th>
+              <th scope="col"><span class="sr-only">操作</span></th>
+            </tr>
+          </thead>
+          <tbody id="ov-body"></tbody>
+        </table>
+        <p id="ov-empty" class="empty" hidden>まだ修正はありません。</p>
+        <p id="ov-count" class="count"></p>
+      </section>
+
+      <section aria-labelledby="h-excluded">
+        <h2 id="h-excluded">触らないサイト</h2>
+        <p class="lead">
+          ここに登録したサイトのタブは、手動の整理でも自動グループ分けでも
+          一切動きません。サブドメインも対象です
+          （<code>example.com</code> は <code>a.example.com</code> も含む）。
+        </p>
+
+        <form id="ex-form" class="toolbar">
+          <label class="grow">
+            <span class="sr-only">ドメイン</span>
+            <input
+              id="ex-input"
+              type="text"
+              placeholder="example.com（URL を貼り付けても可）"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+          <button type="submit">追加</button>
+        </form>
+        <p id="ex-error" class="error" hidden></p>
+
+        <ul id="ex-list" class="chip-list"></ul>
+        <p id="ex-empty" class="empty" hidden>登録はありません。</p>
+      </section>
+
+      <p id="status" class="status" role="status"></p>
+      <p class="footnote">
+        変更は保存済みです。開いているタブの並びに反映するには、
+        ポップアップで「今すぐ整理」を押してください。
+      </p>
+    </main>
+    <script type="module" src="options.js"></script>
+  </body>
+</html>

@@ -49,11 +49,16 @@ Layered, deliberately. Keep these boundaries intact:
 | `src/services/*` | `chrome.tabs`, `chrome.tabGroups`, `chrome.windows` | `chrome.storage` |
 | `src/storage/*` | `chrome.storage` | `chrome.tabs` etc. |
 | `src/background/*` | All of the above | — |
-| `src/popup/*` | Sends messages to background only | `chrome.tabs` directly |
+| `src/popup/*`, `src/options/*` | Sends messages to background only | `chrome.tabs` directly |
 
 In short: classification logic must stay pure and Chrome-API-free.
-Tab/group manipulation lives in `services/`. The popup never touches
-tabs directly — it sends a message to the background SW.
+Tab/group manipulation lives in `services/`. The popup and the options
+page never touch tabs directly — they send a message to the background
+SW. Everything the options page edits lives in `Settings`, so
+`getSettings` / `setSettings` is the whole protocol it needs.
+
+User-facing text belongs in one file per surface (`popup/text.ts`,
+`options/text.ts`). The background sends codes, never prose.
 
 ## Classification rules are data, not code
 

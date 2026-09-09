@@ -352,6 +352,7 @@ function wireSettings() {
       if (reload) await refreshPreview();
     });
   };
+  $("btn-options").addEventListener("click", () => chrome.runtime.openOptionsPage());
   bind("set-auto-group", "autoGroupEnabled", false);
   bind("set-ignore-pinned", "ignorePinnedTabs", true);
   bind("set-keep-active", "keepActiveTabPosition", false);
