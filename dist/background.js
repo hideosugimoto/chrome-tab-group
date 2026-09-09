@@ -197,10 +197,10 @@ var HOST_ENV_RE = new RegExp(
   "i"
 );
 var PATH_ENV_RE = new RegExp(
-  "(^|[.\\-/_])(" + PATH_ENV_KEYWORDS.join("|") + ")([.\\-/_]|$)",
+  "(^|/)(" + PATH_ENV_KEYWORDS.join("|") + ")(/|$)",
   "i"
 );
-function isLocalUrl(rawUrl) {
+function isLocalHostUrl(rawUrl) {
   const p = parseUrl(rawUrl);
   if (!p.ok) return false;
   if (LOCAL_HOSTS.has(p.hostname)) return true;
@@ -209,9 +209,12 @@ function isLocalUrl(rawUrl) {
   if (/^10\./.test(p.hostname)) return true;
   if (/^192\.168\./.test(p.hostname)) return true;
   if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(p.hostname)) return true;
-  if (HOST_ENV_RE.test(p.hostname)) return true;
-  if (PATH_ENV_RE.test(p.pathname)) return true;
-  return false;
+  return HOST_ENV_RE.test(p.hostname);
+}
+function isLocalPathUrl(rawUrl) {
+  const p = parseUrl(rawUrl);
+  if (!p.ok) return false;
+  return PATH_ENV_RE.test(p.pathname);
 }
 
 // src/rules/domainRules.ts
@@ -230,6 +233,9 @@ var DOMAIN_RULES = [
   { name: "bitbucket-pr", hostMatch: /(^|\.)bitbucket\.org$/, pathInclude: /\/pull-requests(\/|$)/, category: "Review" },
   { name: "bitbucket-pipelines", hostMatch: /(^|\.)bitbucket\.org$/, pathInclude: /\/addon\/pipelines/, category: "Cloud" },
   // ─── Review: ticket / project mgmt ────────────────────────────────
+  // Confluence shares atlassian.net with Jira, so it has to come before
+  // both Jira rows or 'jira-bare' claims every wiki page.
+  { name: "confluence", hostMatch: /\.atlassian\.net$/, pathInclude: /\/wiki(\/|$)/, category: "Docs" },
   { name: "jira", hostMatch: /\.atlassian\.net$/, pathInclude: /\/(jira|browse|projects|servicedesk)/, category: "Review" },
   { name: "jira-bare", hostMatch: /\.atlassian\.net$/, category: "Review" },
   { name: "backlog", hostMatch: /\.backlog\.(com|jp)$/, category: "Review" },
@@ -265,7 +271,7 @@ var DOMAIN_RULES = [
   { name: "gdrive", hostMatch: /(^|\.)drive\.google\.com$/, category: "Docs" },
   { name: "gsites", hostMatch: /(^|\.)sites\.google\.com$/, category: "Docs" },
   { name: "notion", hostMatch: /(^|\.)notion\.(so|site)$/, category: "Docs" },
-  { name: "confluence", hostMatch: /\.atlassian\.net$/, pathInclude: /\/wiki(\/|$)/, category: "Docs" },
+  // 'confluence' lives in the Review block above — it must outrank 'jira-bare'.
   // SharePoint: split by path keywords.
   { name: "sharepoint-review", hostMatch: /\.sharepoint\.com$/, pathInclude: /\/(approval|approvals|task|tasks|review|form|forms)(\/|$)/i, category: "Review" },
   { name: "sharepoint-docs", hostMatch: /\.sharepoint\.com$/, category: "Docs" },
@@ -305,6 +311,8 @@ var DOMAIN_RULES = [
   // ─── Cloud ────────────────────────────────────────────────────────
   { name: "aws-console", hostMatch: /(^|\.)console\.aws\.amazon\.com$/, category: "Cloud" },
   { name: "aws-signin", hostMatch: /(^|\.)signin\.aws\.amazon\.com$/, category: "Cloud" },
+  // BigQuery is Data, not Cloud — it must precede the bare console row.
+  { name: "bigquery", hostMatch: /(^|\.)console\.cloud\.google\.com$/, pathInclude: /\/bigquery/, category: "Data" },
   { name: "gcp-console", hostMatch: /(^|\.)console\.cloud\.google\.com$/, category: "Cloud" },
   { name: "azure-portal", hostMatch: /(^|\.)portal\.azure\.com$/, category: "Cloud" },
   { name: "cloudflare", hostMatch: /(^|\.)(dash\.)?cloudflare\.com$/, category: "Cloud" },
@@ -331,7 +339,7 @@ var DOMAIN_RULES = [
   { name: "sheets-bare", hostMatch: /(^|\.)sheets\.google\.com$/, category: "Data" },
   { name: "excel-online", hostMatch: /(^|\.)office\.com$/, pathInclude: /\/excel/, category: "Data" },
   { name: "airtable", hostMatch: /(^|\.)airtable\.com$/, category: "Data" },
-  { name: "bigquery", hostMatch: /(^|\.)console\.cloud\.google\.com$/, pathInclude: /\/bigquery/, category: "Data" },
+  // 'bigquery' lives in the Cloud block above — it must outrank 'gcp-console'.
   { name: "looker-studio", hostMatch: /(^|\.)lookerstudio\.google\.com$/, category: "Data" },
   { name: "looker", hostMatch: /(^|\.)looker\.com$/, category: "Data" },
   { name: "tableau", hostMatch: /(^|\.)(online\.)?tableau\.com$/, category: "Data" },
@@ -394,7 +402,10 @@ var TITLE_RULES = [
   { name: "title-issue", titleInclude: /\b(issue|ticket|task) #?\d+/i, category: "Review" },
   { name: "title-build", titleInclude: /\b(build|deploy|deployment|pipeline|workflow run)\b/i, category: "Cloud" },
   { name: "title-spec", titleInclude: /\b(spec|specification|design doc|RFC)\b/i, category: "Docs" },
-  { name: "title-docs", titleInclude: /\b(documentation|docs?)\b/i, category: "Research" }
+  // Bare "doc"/"docs" is not evidence — it appears in ordinary prose
+  // and in half the titles on a documentation-heavy site. Only the
+  // spelled-out words are precise enough for a last-resort rule.
+  { name: "title-docs", titleInclude: /\b(documentation|api reference)\b/i, category: "Research" }
 ];
 
 // src/domain/overrides.ts
@@ -456,7 +467,7 @@ function classifyDetailed(input, context = {}) {
   if (override) {
     return { category: override.category, source: "override", ruleName: override.key };
   }
-  if (isLocalUrl(url)) return { category: "Local", source: "local", ruleName: "local-url" };
+  if (isLocalHostUrl(url)) return { category: "Local", source: "local", ruleName: "local-host" };
   const customRules = context.customRules ?? [];
   const customHit = sortByPriority(customRules).find((r) => matchRule(r, parsed, title, url));
   if (customHit) {
@@ -465,6 +476,9 @@ function classifyDetailed(input, context = {}) {
   const domainHit = sortByPriority(DOMAIN_RULES).find((r) => matchRule(r, parsed, title, url));
   if (domainHit) {
     return { category: domainHit.category, source: "domain", ruleName: domainHit.name ?? null };
+  }
+  if (isLocalPathUrl(url)) {
+    return { category: "Local", source: "local", ruleName: "local-path" };
   }
   const pathHit = PATH_RULES.find((r) => matchRule(r, parsed, title, url));
   if (pathHit) {

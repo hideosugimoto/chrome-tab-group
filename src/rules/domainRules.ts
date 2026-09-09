@@ -29,6 +29,9 @@ export const DOMAIN_RULES: readonly DomainRule[] = [
   { name: 'bitbucket-pipelines', hostMatch: /(^|\.)bitbucket\.org$/, pathInclude: /\/addon\/pipelines/, category: 'Cloud' },
 
   // ─── Review: ticket / project mgmt ────────────────────────────────
+  // Confluence shares atlassian.net with Jira, so it has to come before
+  // both Jira rows or 'jira-bare' claims every wiki page.
+  { name: 'confluence', hostMatch: /\.atlassian\.net$/, pathInclude: /\/wiki(\/|$)/, category: 'Docs' },
   { name: 'jira', hostMatch: /\.atlassian\.net$/, pathInclude: /\/(jira|browse|projects|servicedesk)/, category: 'Review' },
   { name: 'jira-bare', hostMatch: /\.atlassian\.net$/, category: 'Review' },
   { name: 'backlog', hostMatch: /\.backlog\.(com|jp)$/, category: 'Review' },
@@ -67,7 +70,7 @@ export const DOMAIN_RULES: readonly DomainRule[] = [
   { name: 'gdrive', hostMatch: /(^|\.)drive\.google\.com$/, category: 'Docs' },
   { name: 'gsites', hostMatch: /(^|\.)sites\.google\.com$/, category: 'Docs' },
   { name: 'notion', hostMatch: /(^|\.)notion\.(so|site)$/, category: 'Docs' },
-  { name: 'confluence', hostMatch: /\.atlassian\.net$/, pathInclude: /\/wiki(\/|$)/, category: 'Docs' },
+  // 'confluence' lives in the Review block above — it must outrank 'jira-bare'.
   // SharePoint: split by path keywords.
   { name: 'sharepoint-review', hostMatch: /\.sharepoint\.com$/, pathInclude: /\/(approval|approvals|task|tasks|review|form|forms)(\/|$)/i, category: 'Review' },
   { name: 'sharepoint-docs', hostMatch: /\.sharepoint\.com$/, category: 'Docs' },
@@ -109,6 +112,8 @@ export const DOMAIN_RULES: readonly DomainRule[] = [
   // ─── Cloud ────────────────────────────────────────────────────────
   { name: 'aws-console', hostMatch: /(^|\.)console\.aws\.amazon\.com$/, category: 'Cloud' },
   { name: 'aws-signin', hostMatch: /(^|\.)signin\.aws\.amazon\.com$/, category: 'Cloud' },
+  // BigQuery is Data, not Cloud — it must precede the bare console row.
+  { name: 'bigquery', hostMatch: /(^|\.)console\.cloud\.google\.com$/, pathInclude: /\/bigquery/, category: 'Data' },
   { name: 'gcp-console', hostMatch: /(^|\.)console\.cloud\.google\.com$/, category: 'Cloud' },
   { name: 'azure-portal', hostMatch: /(^|\.)portal\.azure\.com$/, category: 'Cloud' },
   { name: 'cloudflare', hostMatch: /(^|\.)(dash\.)?cloudflare\.com$/, category: 'Cloud' },
@@ -136,7 +141,7 @@ export const DOMAIN_RULES: readonly DomainRule[] = [
   { name: 'sheets-bare', hostMatch: /(^|\.)sheets\.google\.com$/, category: 'Data' },
   { name: 'excel-online', hostMatch: /(^|\.)office\.com$/, pathInclude: /\/excel/, category: 'Data' },
   { name: 'airtable', hostMatch: /(^|\.)airtable\.com$/, category: 'Data' },
-  { name: 'bigquery', hostMatch: /(^|\.)console\.cloud\.google\.com$/, pathInclude: /\/bigquery/, category: 'Data' },
+  // 'bigquery' lives in the Cloud block above — it must outrank 'gcp-console'.
   { name: 'looker-studio', hostMatch: /(^|\.)lookerstudio\.google\.com$/, category: 'Data' },
   { name: 'looker', hostMatch: /(^|\.)looker\.com$/, category: 'Data' },
   { name: 'tableau', hostMatch: /(^|\.)(online\.)?tableau\.com$/, category: 'Data' },

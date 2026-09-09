@@ -5,7 +5,7 @@ import type {
   DomainRule
 } from '../types';
 import { parseUrl } from '../utils/url';
-import { isLocalUrl } from '../rules/localPatterns';
+import { isLocalHostUrl, isLocalPathUrl } from '../rules/localPatterns';
 import { DOMAIN_RULES } from '../rules/domainRules';
 import { PATH_RULES } from '../rules/pathRules';
 import { TITLE_RULES } from '../rules/titleRules';
@@ -21,11 +21,18 @@ export interface ClassifyContext {
  *
  * Order:
  *   0. User overrides — explicit user intent beats every rule.
- *   1. Local environment heuristics (URL host/path keywords).
+ *   1. Local environment by hostname (localhost, private IP, staging.*).
  *   2. Custom rules, then built-in domain rules.
- *   3. Domain-agnostic path rules.
- *   4. Title keyword rules.
- *   5. Misc.
+ *   3. Local environment by path segment (/staging/, /qa/, ...).
+ *   4. Domain-agnostic path rules.
+ *   5. Title keyword rules.
+ *   6. Misc.
+ *
+ * Steps 1 and 3 are the same heuristic split by confidence. A hostname
+ * that says "not production" is decisive, so it runs first. A mere path
+ * segment is not: github.com/acme/dev is a repository and
+ * vercel.com/acme/preview is a real product page, so the path half runs
+ * only after the domain rules have declined the URL.
  *
  * Returns the matched rule name so the UI can explain *why* a tab
  * landed where it did — the thing an AI organizer cannot do.
@@ -45,8 +52,8 @@ export function classifyDetailed(
     return { category: override.category, source: 'override', ruleName: override.key };
   }
 
-  // 1. Local environments are never overridden by service domain.
-  if (isLocalUrl(url)) return { category: 'Local', source: 'local', ruleName: 'local-url' };
+  // 1. A local-looking hostname is never overridden by a service domain.
+  if (isLocalHostUrl(url)) return { category: 'Local', source: 'local', ruleName: 'local-host' };
 
   // 2. Custom rules first so users can shadow the built-ins.
   const customRules = context.customRules ?? [];
@@ -60,13 +67,18 @@ export function classifyDetailed(
     return { category: domainHit.category, source: 'domain', ruleName: domainHit.name ?? null };
   }
 
-  // 3. Path-only rules.
+  // 3. Environment keyword in the path — only for hosts no rule claimed.
+  if (isLocalPathUrl(url)) {
+    return { category: 'Local', source: 'local', ruleName: 'local-path' };
+  }
+
+  // 4. Path-only rules.
   const pathHit = PATH_RULES.find((r) => matchRule(r, parsed, title, url));
   if (pathHit) {
     return { category: pathHit.category, source: 'path', ruleName: pathHit.name ?? null };
   }
 
-  // 4. Title-only rules.
+  // 5. Title-only rules.
   const titleHit = TITLE_RULES.find((r) => matchRule(r, parsed, title, url));
   if (titleHit) {
     return { category: titleHit.category, source: 'title', ruleName: titleHit.name ?? null };

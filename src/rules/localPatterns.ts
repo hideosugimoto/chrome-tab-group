@@ -3,9 +3,17 @@ import { parseUrl } from '../utils/url';
 /**
  * Local / dev environment detection.
  *
- * Order: hostname check first (cheap), then label-based env keywords on
- * subdomain / path. We use word-boundary aware checks to avoid matching
- * "production" by accident.
+ * Deliberately split in two, because the two halves carry very
+ * different confidence and so run at different points in `classify.ts`:
+ *
+ *   isLocalHostUrl — the hostname itself says "not production"
+ *     (localhost, a private IP, staging.example.com). Nothing outranks
+ *     this: a real service domain is never one of these.
+ *
+ *   isLocalPathUrl — only a path segment hints at an environment
+ *     (example.com/staging/login). Weak evidence, because real services
+ *     have paths like /preview and repositories named "dev". It runs
+ *     *after* the domain rules, so it can only claim unknown hosts.
  */
 
 const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '0.0.0.0', '::1']);
@@ -40,12 +48,20 @@ const HOST_ENV_RE = new RegExp(
   'i'
 );
 
+/**
+ * Whole path segments only.
+ *
+ * The `[.\-_]` boundaries used for hostnames are right there
+ * (`staging-app.example.com`) but wrong for paths, where they also
+ * swallow `/test-driven-development/` and `/dev-blog/`.
+ */
 const PATH_ENV_RE = new RegExp(
-  '(^|[.\\-/_])(' + PATH_ENV_KEYWORDS.join('|') + ')([.\\-/_]|$)',
+  '(^|/)(' + PATH_ENV_KEYWORDS.join('|') + ')(/|$)',
   'i'
 );
 
-export function isLocalUrl(rawUrl: string): boolean {
+/** Hostname alone identifies a non-production environment. */
+export function isLocalHostUrl(rawUrl: string): boolean {
   const p = parseUrl(rawUrl);
   if (!p.ok) return false;
 
@@ -58,9 +74,15 @@ export function isLocalUrl(rawUrl: string): boolean {
   if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(p.hostname)) return true;
 
   // Subdomain keyword (e.g. staging.example.com) — narrow set only.
-  if (HOST_ENV_RE.test(p.hostname)) return true;
-  // Path keyword (e.g. app.com/qa/..., app.com/dev/...) — broader set.
-  if (PATH_ENV_RE.test(p.pathname)) return true;
+  return HOST_ENV_RE.test(p.hostname);
+}
 
-  return false;
+/**
+ * A path segment hints at an environment (e.g. app.com/qa/...).
+ * Only meaningful once the domain rules have declined the URL.
+ */
+export function isLocalPathUrl(rawUrl: string): boolean {
+  const p = parseUrl(rawUrl);
+  if (!p.ok) return false;
+  return PATH_ENV_RE.test(p.pathname);
 }
