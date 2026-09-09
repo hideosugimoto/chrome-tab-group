@@ -25,6 +25,7 @@ import { isExcludedUrl, isUserExcludedDomain } from '../domain/exclusion';
 import { planGrouping, type ManagedGroup, type PlanTab } from '../domain/groupPlan';
 import { formatGroupTitle, recognizeGroupTitle } from '../domain/groupTitle';
 import { planUndoRegroup } from '../domain/undoPlan';
+import { selectRebuildTabs } from '../domain/rebuildPlan';
 import { CATEGORY_COLOR } from '../constants/colors';
 import { CATEGORY_ORDER } from '../constants/categories';
 import { getSettings, getUndoSnapshot, setUndoSnapshot } from '../storage/store';
@@ -54,6 +55,10 @@ export interface OrganizeResult {
   movedTabs: number;
   createdGroups: number;
   skippedUserGroupTabs: number;
+}
+
+export interface RebuildResult extends OrganizeResult {
+  dissolvedGroups: number;
 }
 
 export interface ClassifiedTab {
@@ -428,6 +433,63 @@ async function restoreGroups(
   }
 
   if (restored.length > 0) await registerManagedGroups(restored);
+}
+
+// ─── Rebuild ────────────────────────────────────────────────────────
+
+/**
+ * Dissolve the groups we own, then group the window from scratch.
+ *
+ * For when the tab strip has drifted — order scrambled by automatic
+ * additions, a stale group left behind by a restart, corrections
+ * changed in bulk. Organize alone cannot fix those, because it is
+ * differential by design and never dissolves anything.
+ *
+ * Scope is the registry and nothing else. Unlike the organize pass,
+ * this deliberately does NOT consult `adoptMatchingGroups`: dissolving
+ * is destructive enough that a title-and-color guess is the wrong
+ * basis for it. A group we never recorded stays the user's.
+ */
+export async function rebuildWindow(windowId: number): Promise<RebuildResult> {
+  const settings = await getSettings();
+  const liveGroups = await getGroupsInWindow(windowId);
+  const registry = await getManagedGroups();
+  const ownedIds = new Set(liveGroups.map((g) => g.id).filter((id) => registry.has(id)));
+
+  const tabs = await getTabsInWindow(windowId);
+  const { toUngroup, touched } = selectRebuildTabs(
+    tabs
+      .filter((t): t is chrome.tabs.Tab & { id: number } => typeof t.id === 'number')
+      .map((t) => ({
+        tabId: t.id,
+        groupId: t.groupId ?? UNGROUPED,
+        organizable: isOrganizableTab(t, settings)
+      })),
+    ownedIds
+  );
+
+  // One snapshot covering the whole operation, taken before anything
+  // moves, so a single undo restores the window as it was. Skipped
+  // when there is nothing to do — pressing rebuild on an already-tidy
+  // window must not throw away the undo of the user's last real action.
+  if (touched.length > 0) {
+    await setUndoSnapshot(buildSnapshot(windowId, touched, tabs, liveGroups));
+  }
+
+  try {
+    await ungroupTabs(toUngroup);
+  } catch (e) {
+    console.warn('rebuild ungroup partial failure:', e);
+  }
+
+  // Chrome removes a group once its last tab leaves; drop the dead IDs.
+  const liveAfter = new Set((await getAllGroups()).map((g) => g.id));
+  await pruneManagedGroups(liveAfter);
+  // Report what actually went away, not what we intended to remove.
+  const dissolvedGroups = [...ownedIds].filter((id) => !liveAfter.has(id)).length;
+
+  const result = await organizeWindow(windowId, { skipSnapshot: true });
+  return { ...result, dissolvedGroups };
 }
 
 export async function undoLast(): Promise<{ ok: boolean; reason?: UndoFailureReason }> {

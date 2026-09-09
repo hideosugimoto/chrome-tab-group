@@ -32,6 +32,9 @@ var UI = {
   suggestionCount: (n) => `\u5019\u88DC ${n} \u4EF6`,
   noPairs: "\u9069\u5207\u306A\u5019\u88DC\u306F\u898B\u3064\u304B\u308A\u307E\u305B\u3093\u3067\u3057\u305F",
   pairScore: (reason, score) => `${reason} \xB7 \u30B9\u30B3\u30A2 ${score}`,
+  rebuilding: "\u4F5C\u308A\u76F4\u3057\u3066\u3044\u307E\u3059\u2026",
+  rebuildDone: (dissolved, moved, created) => `${dissolved} \u4EF6\u306E\u30B0\u30EB\u30FC\u30D7\u3092\u89E3\u9664\u3057\u3001${moved} \u4EF6\u306E\u30BF\u30D6\u3092 ${created} \u4EF6\u306E\u30B0\u30EB\u30FC\u30D7\u306B\u307E\u3068\u3081\u307E\u3057\u305F`,
+  rebuildNothing: "\u6574\u7406\u3067\u304D\u308B\u30BF\u30D6\u304C\u3042\u308A\u307E\u305B\u3093\u3067\u3057\u305F",
   undoing: "\u53D6\u308A\u6D88\u3057\u4E2D\u2026",
   undoDone: "\u6574\u7406\u524D\u306E\u72B6\u614B\u306B\u623B\u3057\u307E\u3057\u305F",
   applying: "\u9069\u7528\u4E2D\u2026",
@@ -252,6 +255,9 @@ function renderCurrentTab(info) {
   const exclusion = explainExclusion(info.exclusion);
   $("ct-reason").textContent = !info.correctable ? NOT_CORRECTABLE : exclusion === null ? rule : `${rule} \xB7 ${exclusion}`;
 }
+async function refreshAll() {
+  await Promise.all([refreshPreview(), refreshCurrentTab()]);
+}
 async function refreshCurrentTab() {
   const windowId = await getWindowId();
   const resp = await send({ kind: "activeTab", windowId });
@@ -274,7 +280,7 @@ async function loadSettings() {
 async function saveSettings(patch) {
   await send({ kind: "setSettings", patch });
 }
-function wireActions() {
+function wireOrganize() {
   $("btn-organize").addEventListener("click", async () => {
     setStatus(UI.organizing);
     const windowId = await getWindowId();
@@ -283,11 +289,28 @@ function wireActions() {
       setStatus(
         resp.movedTabs === 0 ? UI.organizeNoop : UI.organizeDone(resp.movedTabs, resp.createdGroups)
       );
-      await Promise.all([refreshPreview(), refreshCurrentTab()]);
+      await refreshAll();
     } else if (resp.kind === "error") {
       setError(resp.message);
     }
   });
+}
+function wireRebuild() {
+  $("btn-rebuild").addEventListener("click", async () => {
+    setStatus(UI.rebuilding);
+    const windowId = await getWindowId();
+    const resp = await send({ kind: "rebuild", windowId });
+    if (resp.kind === "rebuild") {
+      setStatus(
+        resp.dissolvedGroups === 0 && resp.movedTabs === 0 ? UI.rebuildNothing : UI.rebuildDone(resp.dissolvedGroups, resp.movedTabs, resp.createdGroups)
+      );
+      await refreshAll();
+    } else if (resp.kind === "error") {
+      setError(resp.message);
+    }
+  });
+}
+function wireSuggest() {
   $("btn-suggest").addEventListener("click", async () => {
     setStatus(UI.scoring);
     const windowId = await getWindowId();
@@ -299,12 +322,14 @@ function wireActions() {
       setError(resp.message);
     }
   });
+}
+function wireUndo() {
   $("btn-undo").addEventListener("click", async () => {
     setStatus(UI.undoing);
     const resp = await send({ kind: "undo" });
     if (resp.kind === "undo") {
       setStatus(resp.ok ? UI.undoDone : undoFailure(resp.reason));
-      await Promise.all([refreshPreview(), refreshCurrentTab()]);
+      await refreshAll();
     } else if (resp.kind === "error") {
       setError(resp.message);
     }
@@ -326,7 +351,7 @@ function wireCurrentTab() {
     });
     if (resp.kind === "overrideApplied") {
       setStatus(UI.overrideApplied(resp.key, category, resp.affectedTabs));
-      await Promise.all([refreshPreview(), refreshCurrentTab()]);
+      await refreshAll();
     } else if (resp.kind === "error") {
       setError(resp.message);
       await refreshCurrentTab();
@@ -339,7 +364,7 @@ function wireCurrentTab() {
     const resp = await send({ kind: "clearOverride", windowId, url: currentTab.url });
     if (resp.kind === "overrideApplied") {
       setStatus(UI.overrideReset(resp.key));
-      await Promise.all([refreshPreview(), refreshCurrentTab()]);
+      await refreshAll();
     } else if (resp.kind === "error") {
       setError(resp.message);
     }
@@ -361,10 +386,13 @@ function wireSettings() {
 }
 (async function main() {
   populateCategorySelect();
-  wireActions();
+  wireOrganize();
+  wireRebuild();
+  wireSuggest();
+  wireUndo();
   wireCurrentTab();
   wireSettings();
   await loadSettings();
-  await Promise.all([refreshPreview(), refreshCurrentTab()]);
+  await refreshAll();
 })();
 //# sourceMappingURL=popup.js.map

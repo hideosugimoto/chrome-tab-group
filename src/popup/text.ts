@@ -39,6 +39,11 @@ export const UI = {
   noPairs: '適切な候補は見つかりませんでした',
   pairScore: (reason: string, score: number): string => `${reason} · スコア ${score}`,
 
+  rebuilding: '作り直しています…',
+  rebuildDone: (dissolved: number, moved: number, created: number): string =>
+    `${dissolved} 件のグループを解除し、${moved} 件のタブを ${created} 件のグループにまとめました`,
+  rebuildNothing: '整理できるタブがありませんでした',
+
   undoing: '取り消し中…',
   undoDone: '整理前の状態に戻しました',
 

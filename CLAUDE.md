@@ -94,6 +94,14 @@ Never reintroduce the old "ungroup everything, then rebuild" approach.
 Grouping is differential: `domain/groupPlan.ts` computes the minimum
 set of operations, and tabs already in the right place are not moved.
 
+`organize.ts#rebuildWindow` is the one deliberate exception, and it is
+scoped: it dissolves the groups in the registry and nothing else. It
+does not consult `adoptMatchingGroups` — dissolving is destructive
+enough that a title-and-color guess is the wrong basis for it, so a
+group we never recorded stays the user's. `domain/rebuildPlan.ts`
+decides which tabs it releases and which it must snapshot; get that
+set wrong and undo silently cannot restore the window.
+
 ## Automatic grouping stays quiet
 
 `background/autoGroup.ts` runs on tab events. It is off by default and

@@ -23,7 +23,7 @@ import { getSettings, setSettings } from '../storage/store';
 import { getFallbackWindowId, getTabsInWindow } from '../services/tabsService';
 import { isExcludedUrl, isUserExcludedDomain } from '../domain/exclusion';
 import { suggestSplitPairs } from '../scoring/splitPair';
-import { organizeWindow, previewWindow, undoLast } from './organize';
+import { organizeWindow, previewWindow, rebuildWindow, undoLast } from './organize';
 import { registerAutoGroupListeners } from './autoGroup';
 import { applyOverride, clearOverridesForUrl, describeActiveTab } from './currentTab';
 
@@ -35,6 +35,7 @@ export type { ActiveTabInfo, ActiveTabExclusion } from './currentTab';
 export type RequestMessage =
   | { kind: 'preview'; windowId: number }
   | { kind: 'organize'; windowId: number }
+  | { kind: 'rebuild'; windowId: number }
   | { kind: 'undo' }
   | { kind: 'suggestPairs'; windowId: number }
   | { kind: 'getSettings' }
@@ -52,6 +53,13 @@ export type ResponseMessage =
     }
   | {
       kind: 'organize';
+      movedTabs: number;
+      createdGroups: number;
+      skippedUserGroupTabs: number;
+    }
+  | {
+      kind: 'rebuild';
+      dissolvedGroups: number;
       movedTabs: number;
       createdGroups: number;
       skippedUserGroupTabs: number;
@@ -116,6 +124,10 @@ async function route(msg: RequestMessage): Promise<ResponseMessage> {
     case 'organize': {
       const r = await organizeWindow(msg.windowId);
       return { kind: 'organize', ...r };
+    }
+    case 'rebuild': {
+      const r = await rebuildWindow(msg.windowId);
+      return { kind: 'rebuild', ...r };
     }
     case 'undo': {
       const r = await undoLast();

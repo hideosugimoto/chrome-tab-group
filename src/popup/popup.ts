@@ -224,6 +224,11 @@ function renderCurrentTab(info: ActiveTabInfo | null): void {
       : `${rule} · ${exclusion}`;
 }
 
+/** Re-read everything the popup shows after an action changed it. */
+async function refreshAll(): Promise<void> {
+  await Promise.all([refreshPreview(), refreshCurrentTab()]);
+}
+
 async function refreshCurrentTab(): Promise<void> {
   const windowId = await getWindowId();
   const resp = await send({ kind: 'activeTab', windowId });
@@ -253,7 +258,7 @@ async function saveSettings(patch: Partial<Settings>): Promise<void> {
 
 // ─── Wiring ─────────────────────────────────────────────────────────
 
-function wireActions(): void {
+function wireOrganize(): void {
   $('btn-organize').addEventListener('click', async () => {
     setStatus(UI.organizing);
     const windowId = await getWindowId();
@@ -264,12 +269,32 @@ function wireActions(): void {
           ? UI.organizeNoop
           : UI.organizeDone(resp.movedTabs, resp.createdGroups)
       );
-      await Promise.all([refreshPreview(), refreshCurrentTab()]);
+      await refreshAll();
     } else if (resp.kind === 'error') {
       setError(resp.message);
     }
   });
+}
 
+function wireRebuild(): void {
+  $('btn-rebuild').addEventListener('click', async () => {
+    setStatus(UI.rebuilding);
+    const windowId = await getWindowId();
+    const resp = await send({ kind: 'rebuild', windowId });
+    if (resp.kind === 'rebuild') {
+      setStatus(
+        resp.dissolvedGroups === 0 && resp.movedTabs === 0
+          ? UI.rebuildNothing
+          : UI.rebuildDone(resp.dissolvedGroups, resp.movedTabs, resp.createdGroups)
+      );
+      await refreshAll();
+    } else if (resp.kind === 'error') {
+      setError(resp.message);
+    }
+  });
+}
+
+function wireSuggest(): void {
   $('btn-suggest').addEventListener('click', async () => {
     setStatus(UI.scoring);
     const windowId = await getWindowId();
@@ -281,13 +306,15 @@ function wireActions(): void {
       setError(resp.message);
     }
   });
+}
 
+function wireUndo(): void {
   $('btn-undo').addEventListener('click', async () => {
     setStatus(UI.undoing);
     const resp = await send({ kind: 'undo' });
     if (resp.kind === 'undo') {
       setStatus(resp.ok ? UI.undoDone : undoFailure(resp.reason));
-      await Promise.all([refreshPreview(), refreshCurrentTab()]);
+      await refreshAll();
     } else if (resp.kind === 'error') {
       setError(resp.message);
     }
@@ -310,7 +337,7 @@ function wireCurrentTab(): void {
     });
     if (resp.kind === 'overrideApplied') {
       setStatus(UI.overrideApplied(resp.key, category, resp.affectedTabs));
-      await Promise.all([refreshPreview(), refreshCurrentTab()]);
+      await refreshAll();
     } else if (resp.kind === 'error') {
       setError(resp.message);
       await refreshCurrentTab();
@@ -324,7 +351,7 @@ function wireCurrentTab(): void {
     const resp = await send({ kind: 'clearOverride', windowId, url: currentTab.url });
     if (resp.kind === 'overrideApplied') {
       setStatus(UI.overrideReset(resp.key));
-      await Promise.all([refreshPreview(), refreshCurrentTab()]);
+      await refreshAll();
     } else if (resp.kind === 'error') {
       setError(resp.message);
     }
@@ -348,9 +375,12 @@ function wireSettings(): void {
 
 (async function main() {
   populateCategorySelect();
-  wireActions();
+  wireOrganize();
+  wireRebuild();
+  wireSuggest();
+  wireUndo();
   wireCurrentTab();
   wireSettings();
   await loadSettings();
-  await Promise.all([refreshPreview(), refreshCurrentTab()]);
+  await refreshAll();
 })();

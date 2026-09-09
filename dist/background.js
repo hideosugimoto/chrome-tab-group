@@ -681,6 +681,22 @@ function planUndoRegroup(tabs, groups, liveGroupIds) {
   return steps;
 }
 
+// src/domain/rebuildPlan.ts
+var UNGROUPED2 = -1;
+function selectRebuildTabs(tabs, ownedGroupIds) {
+  const toUngroup = [];
+  const touched = [];
+  for (const tab of tabs) {
+    if (ownedGroupIds.has(tab.groupId)) {
+      toUngroup.push(tab.tabId);
+      touched.push(tab.tabId);
+      continue;
+    }
+    if (tab.groupId === UNGROUPED2 && tab.organizable) touched.push(tab.tabId);
+  }
+  return { toUngroup, touched };
+}
+
 // src/storage/managedGroups.ts
 var KEY = "managedGroups.v1";
 async function readMap() {
@@ -744,7 +760,7 @@ async function getAllGroups() {
 }
 
 // src/background/organize.ts
-var UNGROUPED2 = -1;
+var UNGROUPED3 = -1;
 async function resolveManagedGroups(windowId, settings) {
   const liveGroups = await getGroupsInWindow(windowId);
   const registry = await getManagedGroups();
@@ -786,8 +802,8 @@ function selectTouchableTabs(tabs, settings, managedIds) {
   let skippedUserGroupTabs = 0;
   for (const tab of tabs) {
     if (!isOrganizableTab(tab, settings)) continue;
-    const groupId = tab.groupId ?? UNGROUPED2;
-    if (groupId !== UNGROUPED2 && !managedIds.has(groupId)) {
+    const groupId = tab.groupId ?? UNGROUPED3;
+    if (groupId !== UNGROUPED3 && !managedIds.has(groupId)) {
       skippedUserGroupTabs += 1;
       continue;
     }
@@ -800,11 +816,11 @@ function buildSnapshot(windowId, touchedTabIds, tabs, liveGroups) {
   const tabSnaps = tabs.filter((t) => typeof t.id === "number" && touched.has(t.id)).map((t) => ({
     tabId: t.id,
     index: t.index,
-    groupId: t.groupId ?? UNGROUPED2,
+    groupId: t.groupId ?? UNGROUPED3,
     pinned: t.pinned ?? false
   }));
   const neededGroupIds = new Set(
-    tabSnaps.map((t) => t.groupId).filter((id) => id !== UNGROUPED2)
+    tabSnaps.map((t) => t.groupId).filter((id) => id !== UNGROUPED3)
   );
   const groupSnaps = liveGroups.filter((g) => neededGroupIds.has(g.id)).map((g) => ({
     groupId: g.id,
@@ -829,7 +845,7 @@ async function applyPlan(plan, windowId, windowOrdinal) {
   for (const c of plan.creations) {
     try {
       const groupId = await groupTabs(c.tabIds, windowId);
-      if (groupId === UNGROUPED2) continue;
+      if (groupId === UNGROUPED3) continue;
       await updateGroup(groupId, {
         title: formatGroupTitle(c.category, windowOrdinal),
         color: CATEGORY_COLOR[c.category]
@@ -895,7 +911,7 @@ function buildPlan(touchable, managed, options) {
   const planTabs = scoped.map((c) => ({
     tabId: c.tab.id,
     category: c.result.category,
-    currentGroupId: c.tab.groupId ?? UNGROUPED2
+    currentGroupId: c.tab.groupId ?? UNGROUPED3
   }));
   return planGrouping(planTabs, managed, { allowNewGroups: !options.assignOnly });
 }
@@ -944,7 +960,7 @@ async function restoreGroups(snap, alive) {
         snap.windowId,
         step.reuseGroupId ?? void 0
       );
-      if (groupId === UNGROUPED2) continue;
+      if (groupId === UNGROUPED3) continue;
       if (step.meta) {
         await updateGroup(groupId, {
           title: step.meta.title,
@@ -959,6 +975,34 @@ async function restoreGroups(snap, alive) {
     }
   }
   if (restored.length > 0) await registerManagedGroups(restored);
+}
+async function rebuildWindow(windowId) {
+  const settings = await getSettings();
+  const liveGroups = await getGroupsInWindow(windowId);
+  const registry = await getManagedGroups();
+  const ownedIds = new Set(liveGroups.map((g) => g.id).filter((id) => registry.has(id)));
+  const tabs = await getTabsInWindow(windowId);
+  const { toUngroup, touched } = selectRebuildTabs(
+    tabs.filter((t) => typeof t.id === "number").map((t) => ({
+      tabId: t.id,
+      groupId: t.groupId ?? UNGROUPED3,
+      organizable: isOrganizableTab(t, settings)
+    })),
+    ownedIds
+  );
+  if (touched.length > 0) {
+    await setUndoSnapshot(buildSnapshot(windowId, touched, tabs, liveGroups));
+  }
+  try {
+    await ungroupTabs(toUngroup);
+  } catch (e) {
+    console.warn("rebuild ungroup partial failure:", e);
+  }
+  const liveAfter = new Set((await getAllGroups()).map((g) => g.id));
+  await pruneManagedGroups(liveAfter);
+  const dissolvedGroups = [...ownedIds].filter((id) => !liveAfter.has(id)).length;
+  const result = await organizeWindow(windowId, { skipSnapshot: true });
+  return { ...result, dissolvedGroups };
 }
 async function undoLast() {
   const snap = await getUndoSnapshot();
@@ -1222,6 +1266,10 @@ async function route(msg) {
     case "organize": {
       const r = await organizeWindow(msg.windowId);
       return { kind: "organize", ...r };
+    }
+    case "rebuild": {
+      const r = await rebuildWindow(msg.windowId);
+      return { kind: "rebuild", ...r };
     }
     case "undo": {
       const r = await undoLast();
