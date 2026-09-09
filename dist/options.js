@@ -98,11 +98,13 @@ var settings = null;
 function setStatus(text) {
   $("status").textContent = text;
 }
-function loadedSettings() {
-  if (settings === null) {
-    setStatus(UI.error(UI.loadFailed));
+async function currentSettings() {
+  const resp = await send({ kind: "getSettings" });
+  if (resp.kind !== "settings") {
+    setStatus(UI.error(resp.kind === "error" ? resp.message : UI.loadFailed));
     return null;
   }
+  settings = resp.settings;
   return settings;
 }
 async function patchSettings(patch) {
@@ -132,7 +134,7 @@ function buildCategorySelect(key, assigned) {
   select.addEventListener("change", () => {
     const next = select.value;
     void (async () => {
-      const loaded = loadedSettings();
+      const loaded = await currentSettings();
       if (!loaded) return;
       const merged = { ...loaded.categoryOverrides ?? {}, [key]: next };
       if (await patchSettings({ categoryOverrides: merged })) {
@@ -151,7 +153,7 @@ function buildRemoveButton(key) {
   btn.setAttribute("aria-label", `${key} \u306E\u4FEE\u6B63\u3092\u524A\u9664`);
   btn.addEventListener("click", () => {
     void (async () => {
-      const loaded = loadedSettings();
+      const loaded = await currentSettings();
       if (!loaded) return;
       const rest = { ...loaded.categoryOverrides ?? {} };
       delete rest[key];
@@ -201,7 +203,6 @@ function resetClearAll() {
 function wireClearAll() {
   const btn = $("ov-clear-all");
   btn.addEventListener("click", () => {
-    if (!loadedSettings()) return;
     const count = overrideEntries().length;
     if (count === 0) return;
     if (!clearAllArmed) {
@@ -210,8 +211,11 @@ function wireClearAll() {
       return;
     }
     void (async () => {
+      const loaded = await currentSettings();
+      if (!loaded) return;
+      const total = Object.keys(loaded.categoryOverrides ?? {}).length;
       if (await patchSettings({ categoryOverrides: {} })) {
-        setStatus(UI.overridesCleared(count));
+        setStatus(UI.overridesCleared(total));
         renderOverrides();
       }
     })();
@@ -228,7 +232,7 @@ function buildDomainChip(domain) {
   btn.setAttribute("aria-label", `${domain} \u3092\u524A\u9664`);
   btn.addEventListener("click", () => {
     void (async () => {
-      const loaded = loadedSettings();
+      const loaded = await currentSettings();
       if (!loaded) return;
       const next = withoutDomain(loaded.userExcludedDomains, domain);
       if (await patchSettings({ userExcludedDomains: next })) {
@@ -258,15 +262,15 @@ function wireExcludedForm() {
   input.addEventListener("input", () => showDomainError(null));
   form.addEventListener("submit", (e) => {
     e.preventDefault();
-    const loaded = loadedSettings();
-    if (!loaded) return;
-    const existing = loaded.userExcludedDomains;
-    const result = validateNewDomain(input.value, existing);
-    if (!result.ok) {
-      showDomainError(domainErrorText(result.error));
-      return;
-    }
     void (async () => {
+      const loaded = await currentSettings();
+      if (!loaded) return;
+      const existing = loaded.userExcludedDomains;
+      const result = validateNewDomain(input.value, existing);
+      if (!result.ok) {
+        showDomainError(domainErrorText(result.error));
+        return;
+      }
       const next = withDomain(existing, result.domain);
       if (await patchSettings({ userExcludedDomains: next })) {
         input.value = "";

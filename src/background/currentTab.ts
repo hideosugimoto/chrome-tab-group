@@ -119,6 +119,12 @@ export interface OverrideChangeResult {
   createdGroups: number;
 }
 
+/**
+ * Record a correction and immediately place the tabs it affects.
+ *
+ * Only tabs matching the new key move, and only within `windowId` —
+ * pressing "correct" must never reshuffle the rest of the window.
+ */
 export async function applyOverride(
   windowId: number,
   url: string,

@@ -761,7 +761,7 @@ async function getAllGroups() {
 
 // src/background/organize.ts
 var UNGROUPED3 = -1;
-async function resolveManagedGroups(windowId, settings) {
+async function resolveManagedGroups(windowId, settings, allowAdoption = true) {
   const liveGroups = await getGroupsInWindow(windowId);
   const registry = await getManagedGroups();
   const managed = [];
@@ -772,7 +772,7 @@ async function resolveManagedGroups(windowId, settings) {
       managed.push({ groupId: g.id, category: registered });
       continue;
     }
-    if (!settings.adoptMatchingGroups) continue;
+    if (!allowAdoption || !settings.adoptMatchingGroups) continue;
     const recognized = recognizeGroupTitle(g.title, g.color);
     if (recognized !== null) {
       const entry = { groupId: g.id, category: recognized };
@@ -917,7 +917,11 @@ function buildPlan(touchable, managed, options) {
 }
 async function organizeWindow(windowId, options = {}) {
   const settings = await getSettings();
-  const { managed, liveGroups } = await resolveManagedGroups(windowId, settings);
+  const { managed, liveGroups } = await resolveManagedGroups(
+    windowId,
+    settings,
+    !options.noAdopt
+  );
   await pruneManagedGroups(new Set((await getAllGroups()).map((g) => g.id)));
   const tabs = await getTabsInWindow(windowId);
   const activeTab = await getActiveTabInWindow(windowId);
@@ -1059,12 +1063,31 @@ async function removePendingTabIds(tabIds) {
 // src/background/autoGroup.ts
 var DEBOUNCE_MS = 700;
 var flushTimer;
+var flushing = false;
+var flushAgain = false;
 function scheduleFlush() {
   if (flushTimer !== void 0) clearTimeout(flushTimer);
   flushTimer = setTimeout(() => {
     flushTimer = void 0;
-    void flushPending();
+    void runFlush();
   }, DEBOUNCE_MS);
+}
+async function runFlush() {
+  if (flushing) {
+    flushAgain = true;
+    return;
+  }
+  flushing = true;
+  try {
+    do {
+      flushAgain = false;
+      await flushPending();
+    } while (flushAgain);
+  } catch (e) {
+    console.warn("auto-group flush failed:", e);
+  } finally {
+    flushing = false;
+  }
 }
 async function partitionPending(tabIds) {
   const ready = [];
@@ -1103,7 +1126,8 @@ async function flushPending() {
         restrictToTabIds: new Set(tabIds),
         assignOnly: true,
         skipSnapshot: true,
-        skipSort: true
+        skipSort: true,
+        noAdopt: true
       });
     } catch (e) {
       console.warn("auto-group pass failed for window", windowId, e);

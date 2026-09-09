@@ -45,17 +45,22 @@ function setStatus(text: string): void {
 }
 
 /**
- * Guard every mutating handler.
+ * Read the authoritative settings before every mutation.
  *
- * If the initial load failed, `settings` is null and treating that as
- * "empty" would let the next edit write an empty list over the user's
- * real one. Refuse instead.
+ * Two reasons this is not just the cached copy. If the initial load
+ * failed, `settings` is null and treating that as "empty" would let
+ * the next edit write an empty list over the user's real one. And
+ * `categoryOverrides` is patched as a whole map, so an override added
+ * from the popup while this page sat open would be erased by the next
+ * edit here. Re-reading costs one message and removes both.
  */
-function loadedSettings(): Settings | null {
-  if (settings === null) {
-    setStatus(UI.error(UI.loadFailed));
+async function currentSettings(): Promise<Settings | null> {
+  const resp = await send({ kind: 'getSettings' });
+  if (resp.kind !== 'settings') {
+    setStatus(UI.error(resp.kind === 'error' ? resp.message : UI.loadFailed));
     return null;
   }
+  settings = resp.settings;
   return settings;
 }
 
@@ -91,7 +96,7 @@ function buildCategorySelect(key: string, assigned: Category): HTMLSelectElement
   select.addEventListener('change', () => {
     const next = select.value as Category;
     void (async () => {
-      const loaded = loadedSettings();
+      const loaded = await currentSettings();
       if (!loaded) return;
       const merged = { ...(loaded.categoryOverrides ?? {}), [key]: next };
       if (await patchSettings({ categoryOverrides: merged })) {
@@ -111,7 +116,7 @@ function buildRemoveButton(key: string): HTMLButtonElement {
   btn.setAttribute('aria-label', `${key} の修正を削除`);
   btn.addEventListener('click', () => {
     void (async () => {
-      const loaded = loadedSettings();
+      const loaded = await currentSettings();
       if (!loaded) return;
       const rest = { ...(loaded.categoryOverrides ?? {}) };
       delete rest[key];
@@ -180,7 +185,6 @@ function resetClearAll(): void {
 function wireClearAll(): void {
   const btn = $('ov-clear-all') as HTMLButtonElement;
   btn.addEventListener('click', () => {
-    if (!loadedSettings()) return;
     const count = overrideEntries().length;
     if (count === 0) return;
     if (!clearAllArmed) {
@@ -189,8 +193,11 @@ function wireClearAll(): void {
       return;
     }
     void (async () => {
+      const loaded = await currentSettings();
+      if (!loaded) return;
+      const total = Object.keys(loaded.categoryOverrides ?? {}).length;
       if (await patchSettings({ categoryOverrides: {} })) {
-        setStatus(UI.overridesCleared(count));
+        setStatus(UI.overridesCleared(total));
         renderOverrides();
       }
     })();
@@ -211,7 +218,7 @@ function buildDomainChip(domain: string): HTMLLIElement {
   btn.setAttribute('aria-label', `${domain} を削除`);
   btn.addEventListener('click', () => {
     void (async () => {
-      const loaded = loadedSettings();
+      const loaded = await currentSettings();
       if (!loaded) return;
       const next = withoutDomain(loaded.userExcludedDomains, domain);
       if (await patchSettings({ userExcludedDomains: next })) {
@@ -247,15 +254,15 @@ function wireExcludedForm(): void {
 
   form.addEventListener('submit', (e) => {
     e.preventDefault();
-    const loaded = loadedSettings();
-    if (!loaded) return;
-    const existing = loaded.userExcludedDomains;
-    const result = validateNewDomain(input.value, existing);
-    if (!result.ok) {
-      showDomainError(domainErrorText(result.error));
-      return;
-    }
     void (async () => {
+      const loaded = await currentSettings();
+      if (!loaded) return;
+      const existing = loaded.userExcludedDomains;
+      const result = validateNewDomain(input.value, existing);
+      if (!result.ok) {
+        showDomainError(domainErrorText(result.error));
+        return;
+      }
       const next = withDomain(existing, result.domain);
       if (await patchSettings({ userExcludedDomains: next })) {
         input.value = '';

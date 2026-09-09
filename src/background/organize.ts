@@ -81,10 +81,17 @@ export interface ClassifiedTab {
  * groups would make Organize build a second "Dev" next to the
  * restored one. The cost is that a user group named exactly "Dev" in
  * exactly our blue would be adopted — hence the setting.
+ *
+ * `allowAdoption` is false for the automatic pass. Taking ownership of
+ * a group on a guess is a decision the user should be present for; it
+ * happens when they press something, not while a background tab
+ * finishes loading. After a restart the first manual Organize adopts,
+ * and the automatic pass follows from there.
  */
 async function resolveManagedGroups(
   windowId: number,
-  settings: Settings
+  settings: Settings,
+  allowAdoption = true
 ): Promise<{ managed: ManagedGroup[]; liveGroups: chrome.tabGroups.TabGroup[] }> {
   const liveGroups = await getGroupsInWindow(windowId);
   const registry = await getManagedGroups();
@@ -98,7 +105,7 @@ async function resolveManagedGroups(
       managed.push({ groupId: g.id, category: registered });
       continue;
     }
-    if (!settings.adoptMatchingGroups) continue;
+    if (!allowAdoption || !settings.adoptMatchingGroups) continue;
     const recognized = recognizeGroupTitle(g.title, g.color);
     if (recognized !== null) {
       const entry = { groupId: g.id, category: recognized };
@@ -341,6 +348,11 @@ export interface OrganizeOptions {
   skipSnapshot?: boolean;
   /** Skip the group reordering pass, which moves tabs. */
   skipSort?: boolean;
+  /**
+   * Do not take ownership of an unregistered group that merely looks
+   * like ours. Set by the automatic pass — see resolveManagedGroups.
+   */
+  noAdopt?: boolean;
 }
 
 /** Organize the window. */
@@ -349,7 +361,11 @@ export async function organizeWindow(
   options: OrganizeOptions = {}
 ): Promise<OrganizeResult> {
   const settings = await getSettings();
-  const { managed, liveGroups } = await resolveManagedGroups(windowId, settings);
+  const { managed, liveGroups } = await resolveManagedGroups(
+    windowId,
+    settings,
+    !options.noAdopt
+  );
   // Prune against *all* windows: the registry is global, so pruning
   // with only this window's groups would evict entries for the groups
   // we own in every other window.
@@ -492,6 +508,13 @@ export async function rebuildWindow(windowId: number): Promise<RebuildResult> {
   return { ...result, dissolvedGroups };
 }
 
+/**
+ * Restore the window to the state captured by the last snapshot.
+ *
+ * Only the tabs that operation actually moved are restored, and every
+ * one of them was ours, so undo can never dissolve a group the user
+ * made. The snapshot is consumed either way — undo does not stack.
+ */
 export async function undoLast(): Promise<{ ok: boolean; reason?: UndoFailureReason }> {
   const snap = await getUndoSnapshot();
   if (!snap) return { ok: false, reason: 'no-snapshot' };

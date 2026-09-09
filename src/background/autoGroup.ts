@@ -38,12 +38,43 @@ const DEBOUNCE_MS = 700;
 
 let flushTimer: ReturnType<typeof setTimeout> | undefined;
 
+/**
+ * Only one flush at a time.
+ *
+ * The queue lives in storage, so two overlapping flushes read and
+ * write it non-atomically: one can remove the IDs it just handled
+ * while the other is adding a new one, and the new tab silently
+ * disappears from the queue without ever being grouped. That failure
+ * is invisible and unreproducible, so serialize instead — a request
+ * arriving mid-flush sets `flushAgain` and runs immediately after.
+ */
+let flushing = false;
+let flushAgain = false;
+
 function scheduleFlush(): void {
   if (flushTimer !== undefined) clearTimeout(flushTimer);
   flushTimer = setTimeout(() => {
     flushTimer = undefined;
-    void flushPending();
+    void runFlush();
   }, DEBOUNCE_MS);
+}
+
+async function runFlush(): Promise<void> {
+  if (flushing) {
+    flushAgain = true;
+    return;
+  }
+  flushing = true;
+  try {
+    do {
+      flushAgain = false;
+      await flushPending();
+    } while (flushAgain);
+  } catch (e) {
+    console.warn('auto-group flush failed:', e);
+  } finally {
+    flushing = false;
+  }
 }
 
 /**
@@ -98,7 +129,8 @@ async function flushPending(): Promise<void> {
         restrictToTabIds: new Set(tabIds),
         assignOnly: true,
         skipSnapshot: true,
-        skipSort: true
+        skipSort: true,
+        noAdopt: true
       });
     } catch (e) {
       console.warn('auto-group pass failed for window', windowId, e);
